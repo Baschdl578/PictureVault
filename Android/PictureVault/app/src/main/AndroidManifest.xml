@@ -1,0 +1,109 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+
+    package="org.baschdl.picturevault">
+
+
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.GET_ACCOUNTS" />
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
+    <uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS" />
+    <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
+
+
+    <application
+        android:name=".MyApplication"
+        android:allowBackup="true"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:supportsRtl="true"
+        android:theme="@style/AppTheme">
+
+
+        <receiver android:name=".sync.NotificationReceiver">
+            <intent-filter android:priority="100">
+                <action
+                    android:name="PictureVault.MediaSyncAdapter.addlib"
+                    android:enabled="true" />
+            </intent-filter>
+        </receiver>
+
+        <receiver android:name=".sync.CancelBroadcastReceiver">
+        </receiver>
+
+
+        <activity
+            android:name=".settings.Settings"
+            android:screenOrientation="portrait">
+        </activity>
+
+
+        <activity
+            android:name=".libraries.LibraryChooser"
+            >
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+
+        </activity>
+
+
+        <activity android:name=".thumbs.ImageGrid" />
+
+
+        <activity android:name=".image.FullImage"
+            android:theme="@style/FullScreen">
+
+        </activity>
+
+
+        <activity
+            android:name=".Test"
+            android:screenOrientation="portrait">
+        </activity>
+
+
+
+        <service android:name=".sync.AuthenticatorService">
+            <intent-filter>
+                <action android:name="android.accounts.AccountAuthenticator" />
+            </intent-filter>
+            <meta-data
+                android:name="android.accounts.AccountAuthenticator"
+                android:resource="@xml/pic_authenticator" />
+        </service>
+
+
+        <service android:name=".sync.ForegroundSync"/>
+
+
+        <service
+            android:name=".sync.SyncService"
+            android:exported="true">
+            <!-- This intent filter is required. It allows the system to launch our sync service
+            as needed. -->
+            <intent-filter>
+                <action android:name="android.content.SyncAdapter" />
+            </intent-filter>
+            <!-- This points to a required XML file which describes our SyncAdapter. -->
+            <meta-data
+                android:name="android.content.SyncAdapter"
+                android:resource="@xml/pic_syncadapter" />
+        </service>
+
+
+        <provider
+            android:name=".sync.StubContentProvider"
+            android:authorities="org.baschdl.picturevault.provider"
+            android:exported="false"
+            android:syncable="true" />
+
+
+    </application>
+
+</manifest>

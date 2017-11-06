@@ -1,0 +1,27 @@
+# Maintainer: Sebastian Schindler <remailer2@yahoo.de>
+pkgname=PictureVault
+pkgver=0.1.0
+pkgrel=1
+pkgdesc="Server application to sync media from your phone"
+arch=('any')
+url="https://github.com/Baschdl578/PictureVault"
+license=('GPL')
+depends=('libgexiv2>=0.10' 'exiv2>=0.23' 'ffmpeg' 'gpac' 'libpng' 'libwebp' 'libjpeg' 'mysql')
+makedepends=(cargo)
+source=(git://github.com/Baschdl578/PictureVault)
+md5sums=() #autofill using updpkgsums
+
+build() {
+  cd "PictureVault/Server/picture_vault"
+  cargo build --release
+}
+
+package() {
+  cd "PictureVault/Server"
+
+  cp picturevault.service /usr/lib/systemd/system/
+  cp picture_vault/target/release/picture_vault /usr/bin/
+  chmod +x /usr/bin/picture_vault
+  cp picture_vault.conf /etc/
+  touch /var/log/picture_vault
+}

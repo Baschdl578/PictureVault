@@ -1,0 +1,13 @@
+[Unit]
+Description=PictureVault Server
+After=network.target
+Requires=mariadb.service
+After=mariadb.service
+
+[Service]
+Type=simple
+ExecStart=/bin/picture_vault
+user=root
+
+[Install]
+WantedBy=multi-user.target

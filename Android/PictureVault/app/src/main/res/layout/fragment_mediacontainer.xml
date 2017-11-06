@@ -1,0 +1,218 @@
+<?xml version="1.0" encoding="utf-8"?>
+<android.support.design.widget.CoordinatorLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/black"
+    android:fitsSystemWindows="false"
+    android:padding="0dp">
+
+    <RelativeLayout
+        android:id="@+id/container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent">
+
+
+    </RelativeLayout>
+
+    <LinearLayout
+        android:id="@+id/sheet"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:background="@color/white"
+        android:clipToPadding="true"
+        android:fitsSystemWindows="false"
+        android:orientation="vertical"
+        app:behavior_hideable="true"
+        app:behavior_peekHeight="128dp"
+        app:layout_behavior="android.support.design.widget.BottomSheetBehavior">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="0px"
+            android:layout_marginLeft="20dp"
+            android:layout_marginRight="20dp"
+            android:background="@color/white"
+            android:fitsSystemWindows="false"
+            android:orientation="vertical"
+            android:padding="0px">
+
+            <RelativeLayout
+                android:id="@+id/space"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_margin="0px"
+                android:background="@drawable/transparentbutton"
+                android:clickable="true"
+                android:focusable="true"
+                android:orientation="vertical"
+                android:padding="0px"
+                android:visibility="visible">
+
+                <TextView
+                    android:id="@+id/info"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_alignParentStart="true"
+                    android:layout_alignParentTop="true"
+                    android:focusable="false"
+                    android:paddingTop="12dp"
+                    android:text="@string/infos"
+                    android:textColor="@android:color/primary_text_light"
+                    android:textIsSelectable="false"
+                    android:textSize="20sp" />
+
+                <TextView
+                    android:id="@+id/pullup"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_below="@id/info"
+                    android:layout_marginTop="0dp"
+                    android:focusable="false"
+                    android:text="@string/pullup"
+                    android:textColor="@android:color/tertiary_text_light"
+                    android:textIsSelectable="false" />
+
+                <View
+                    android:id="@+id/line"
+                    android:layout_width="match_parent"
+                    android:layout_height="1dp"
+                    android:layout_below="@id/pullup"
+                    android:layout_marginBottom="0px"
+                    android:layout_marginTop="6dp"
+                    android:background="@color/grey400"
+                    android:focusable="false"
+                    android:padding="0px" />
+
+            </RelativeLayout>
+
+            <android.support.v4.widget.NestedScrollView
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_margin="0px"
+                android:padding="0px">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_margin="0px"
+                    android:orientation="vertical"
+                    android:padding="0px">
+
+                    <TextView
+                        android:id="@+id/filename1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/filename"
+                        android:textColor="@android:color/primary_text_light"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/filename2"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@android:color/secondary_text_light"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/resolution1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/resolution"
+                        android:textColor="@android:color/primary_text_light"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/resolution2"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@android:color/secondary_text_light"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/created1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/creationdate"
+                        android:textColor="@android:color/primary_text_light"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/created2"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@android:color/secondary_text_light"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/modified1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/modified"
+                        android:textColor="@android:color/primary_text_light"
+                        android:textSize="16sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/modified2"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@android:color/secondary_text_light"
+                        android:textSize="16sp" />
+
+                    <TextView
+                        android:id="@+id/gpscoordiantes1"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/gpscoordinates"
+                        android:textColor="@android:color/primary_text_light"
+                        android:textSize="16sp"
+                        android:textStyle="bold"
+                        android:visibility="gone" />
+
+                    <TextView
+                        android:id="@+id/gpscoordiantes2"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:textColor="@android:color/secondary_text_light"
+                        android:textSize="16sp"
+                        android:visibility="gone" />
+
+                    <FrameLayout
+                        android:id="@+id/mapframe"
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:visibility="gone">
+
+                        <org.osmdroid.views.MapView
+                            android:id="@+id/map"
+                            android:layout_width="match_parent"
+                            android:layout_height="180dp"
+                            android:layout_marginBottom="20dp"
+                            android:layout_marginLeft="25dp"
+                            android:layout_marginRight="25dp"
+                            android:layout_marginTop="10dp"
+                            android:visibility="gone" />
+
+                        <View
+                            android:id="@+id/mapOverlay"
+                            android:layout_width="match_parent"
+                            android:layout_height="match_parent"
+                            android:background="@color/transparent" />
+                    </FrameLayout>
+
+                </LinearLayout>
+
+            </android.support.v4.widget.NestedScrollView>
+
+
+        </LinearLayout>
+
+    </LinearLayout>
+
+
+</android.support.design.widget.CoordinatorLayout>

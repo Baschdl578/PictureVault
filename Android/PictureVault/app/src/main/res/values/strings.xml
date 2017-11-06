@@ -1,0 +1,71 @@
+<resources>
+    <string name="app_name">PictureVault</string>
+    <string name="setting_name_serveraddr">Server Adresse</string>
+    <string name="setting_name_serverport">Server Port</string>
+    <string name="setting_name_username">Email Adresse</string>
+    <string name="setting_name_password">Passwort</string>
+    <string name="setting_name_dosync">Synchronisieren</string>
+    <string name="setting_name_only_wifi">Beschränkung auf WLAN</string>
+    <string name="setting_name_specific_wifi">Beschränkung auf ein WLAN Netz</string>
+    <string name="setting_name_wifi_name">WLAN Netz</string>
+    <string name="setting_name_stream_vids">Videos Streamen</string>
+    <string name="setting_name_play_vids">Sofortiges Abspielen</string>
+    <string name="setting_text_serveraddr">ip des servers</string>
+    <string name="setting_text_serverport">port des servers</string>
+    <string name="setting_text_username">email adresse</string>
+    <string name="setting_text_password">passwort</string>
+    <string name="setting_text_dosync">Regelmäßige Synchronisation</string>
+    <string name="setting_text_only_wifi">Medien nur im WLAN sichern</string>
+    <string name="setting_text_specific_wifi">Nur in ausgewähltem Netz sichern</string>
+    <string name="setting_text_wifi_name">Name des Netzes</string>
+    <string name="setting_text_stream_vids">Videos Streamen</string>
+    <string name="setting_text_play_vids">Videos sofort Abspielen</string>
+    <string name="notSet">Nicht gesetzt</string>
+    <string name="setting_invalid">Einstellung ungültig</string>
+    <string name="setting_cat_connection">Verbindung</string>
+    <string name="setting_cat_login">Login</string>
+    <string name="setting_cat_sync">Synchronisation</string>
+    <string name="setting_cat_behavior">Verhalten</string>
+
+    <string name="needspermissions">Die Anwendung benötigt folgende Berechtigungen:</string>
+    <string name="perm_getaccounts_name">Konten lesen und bearbeiten</string>
+    <string name="perm_getaccounts_descr">Um ein Konto für die Synchronisation einzurichten</string>
+    <string name="perm_writeexternal_name">Schreibender Speicherzugriff</string>
+    <string name="perm_writeexternal_descr">Um Dateien temporär zwischenzuspeichern</string>
+    <string name="perm_readexternal_name">Lesender Speicherzugriff</string>
+    <string name="perm_readexternal_descr">Um die Bilder zu lesen</string>
+    <string name="libraries">Bibliotheken</string>
+    <string name="settings">Einstellungen</string>
+
+    <string name="synching">Synchronisieren…</string>
+    <string name="dosync">Synchronisieren</string>
+    <string name="notsync">Nicht Synchronisieren</string>
+    <string name="bucketfoundtitle">Neue Sammlung gefunden!</string>
+    <string name="bucketfound">Neue Sammlung gefunden: %1$s\nWollen Sie sie synchronisieren?</string>
+    <string name="synchdone">Synchronisation abgeschlossen\n%1$s Bilder\n%2$s Videos</string>
+    <string name="channel_newbucket_name">Neues Album</string>
+    <string name="channel_newbucket_description">Neues Album gefunden. Synchronisieren?</string>
+    <string name="channel_syncongoing_name">Synchronisation läuft</string>
+    <string name="channel_syncongoing_description">Benachrichtigung über den Fortschritt des Synchronisationsprozesses</string>
+    <string name="channel_syncdone_name">Synchronisation abgeschlossen</string>
+    <string name="channel_syncdone_description">Zusammenfassung über die hochgeladenen Medien</string>
+
+    <string name="ok" translatable="false">OK</string>
+    <string name="cancel">Abbrechen</string>
+    <string name="close">Schließen</string>
+
+    <string name="notconnected">Es besteht keine Verbindung zum Server</string>
+    <string name="checkingserver">Verbinde zu Server</string>
+    <string name="nolibraries">Es sind noch keine Bilder hochgeladen</string>
+
+    <string name="infos">Informationen</string>
+    <string name="pullup">Hoch ziehen für mehr</string>
+    <string name="filename">Dateiname:</string>
+    <string name="resolution">Auflösung:</string>
+    <string name="creationdate">Aufnahmezeitpunkt:</string>
+    <string name="modified">Zuletzt bearbeitet:</string>
+    <string name="gpscoordinates">GPS Koordinaten:</string>
+    <string name="piclocation">Aufnahmeort</string>
+    <string name="loadingmedia">Lade Medien…</string>
+
+</resources>
