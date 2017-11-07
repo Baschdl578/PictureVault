@@ -21,15 +21,13 @@ fn make_db() -> sql::Pool {
     let db_addr: String = common::get_string("db_address");
     let db_port: i32 = common::get_int("db_port");
 
-    let mut connection: String = "mysql://".to_string();
-
-    connection.push_str(&db_user);
-    connection.push(':');
-    connection.push_str(&db_pass);
-    connection.push('@');
-    connection.push_str(&db_addr);
-    connection.push(':');
-    connection.push_str(&db_port.to_string());
+    let connection: String = String::from(format!(
+        "mysql://{}:{}@{}:{}",
+        db_user,
+        db_pass,
+        db_addr,
+        db_port
+    ));
 
     return sql::Pool::new(connection).unwrap();
 }

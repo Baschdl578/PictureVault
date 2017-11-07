@@ -22,7 +22,7 @@ pub fn make_hashmap_intern(testing: bool) {
     if hashmap.is_empty() {
         let filename = match testing {
             true => "testdata/config",
-            false => "/etc/picture_vault.config",
+            false => "/etc/picture_vault.conf",
         };
         let path = Path::new(filename);
         let file = match File::open(&path) {
