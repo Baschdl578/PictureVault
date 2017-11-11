@@ -11,6 +11,13 @@ makedepends=(cargo)
 source=(git://github.com/Baschdl578/PictureVault)
 md5sums=() #autofill using updpkgsums
 
+prepare() {
+    cd "PictureVault"
+    git reset --hard HEAD      # restore tracked files
+    git clean -xdf
+    git pull
+}
+
 build() {
   cd "PictureVault/Server/picture_vault"
   cargo build --release
