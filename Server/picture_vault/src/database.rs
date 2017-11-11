@@ -248,6 +248,44 @@ fn get_samples(libid: i64, user: i64) -> (i64, i64, i64, i64) {
         let id3 = list[2];
         return (id, id2, id3, -1);
     }
+    if count == 4 {
+        let id = list[0];
+        let id2 = list[1];
+        let id3 = list[2];
+        let id4 = list[3];
+        return (id, id2, id3, id4);
+    }
+    if count == 5 {
+        let id = list[0];
+        let id2 = list[1];
+        let id3 = list[2];
+        let id4;
+        if common::current_time_millis() % 2 == 0 {
+            id4 = list[3];
+        } else {
+            id4 = list[4];
+        }
+        return (id, id2, id3, id4);
+    }
+    if count == 6 {
+        let mut rng = thread_rng();
+        let offset = rng.gen_range(0, 3);
+        let id = list[0 + offset];
+        let id2 = list[1 + offset];
+        let id3 = list[2 + offset];
+        let id4 = list[3 + offset];
+        return (id, id2, id3, id4);
+    }
+    if count == 7 {
+        let mut rng = thread_rng();
+        let offset = rng.gen_range(0, 4);
+        let id = list[0 + offset];
+        let id2 = list[1 + offset];
+        let id3 = list[2 + offset];
+        let id4 = list[3 + offset];
+        return (id, id2, id3, id4);
+    }
+
 
     let mut rng = thread_rng();
     let num1: usize = rng.gen_range(0, (count / 4) - 1);
