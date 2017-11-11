@@ -11,13 +11,6 @@ makedepends=(cargo)
 source=(git://github.com/Baschdl578/PictureVault)
 md5sums=() #autofill using updpkgsums
 
-prepare() {
-    cd "PictureVault"
-    git reset --hard HEAD      # restore tracked files
-    git clean -xdf
-    git pull
-}
-
 build() {
   cd "PictureVault/Server/picture_vault"
   cargo build --release
@@ -25,10 +18,12 @@ build() {
 
 package() {
   cd "PictureVault/Server"
-
-  cp picturevault.service /usr/lib/systemd/system/
-  cp picture_vault/target/release/picture_vault /usr/bin/
-  chmod +x /usr/bin/picture_vault
-  cp picture_vault.conf /etc/
-  touch /var/log/picture_vault
+  install -d "$pkgdir/usr/lib/systemd/system/"
+  install -d "$pkgdir/usr/bin/"
+  install -d "$pkgdir/etc/"
+  install -d "$pkgdir/var/log/"
+  install -Dm644 picturevault.service "$pkgdir/usr/lib/systemd/system/"
+  install -Dm744 picture_vault/target/release/picture_vault "$pkgdir/usr/bin/"
+  install -Dm644 picture_vault.conf "$pkgdir/etc/"
+  touch "$pkgdir/var/log/picture_vault"
 }
