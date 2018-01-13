@@ -70,8 +70,9 @@ pub fn init() {
     stmt = pool.prepare(build_query(
         "CREATE TABLE IF NOT EXISTS §§.Users
         (id INT NOT NULL AUTO_INCREMENT, path TEXT NOT NULL, lastsync BIGINT,
-        email TEXT NOT NULL, pass TEXT NOT NULL, PRIMARY KEY (id))
-        ENGINE=INNODB CHARACTER SET utf8 COLLATE utf8_unicode_ci;",
+        email TEXT NOT NULL, pass TEXT NOT NULL, os_user TEXT NOT NULL,
+        os_group TEXT NOT NULL, group_visible TINYINT NOT NULL DEFAULT '0',
+        PRIMARY KEY (id)) ENGINE=INNODB CHARACTER SET utf8 COLLATE utf8_unicode_ci;",
     )).unwrap();
     let _ = stmt.execute(()).unwrap();
 
@@ -208,6 +209,34 @@ fn get_media_count(id: i64, user: i64) -> u64 {
         return count;
     }
     return 0;
+}
+
+pub fn ownership_info(user: i64) -> (String, String, bool) {
+    let pool = get_db();
+    let query = build_query(
+        "SELECT os_user, os_group, group_visible FROM §§.Users WHERE id = ?",
+    );
+    let mut stmt = pool.prepare(query).unwrap();
+    let result = stmt.execute((user,)).unwrap();
+
+    for row in result {
+        let naked_row = match row {
+            Err(_) => {
+                common::log(&"database.rs", &"get_pics_by_lib", &"Error unwraping row");
+                continue;
+            }
+            Ok(row) => row,
+        };
+        let (user, group, visible) = match sql::from_row_opt::<(String, String, i8)>(naked_row) {
+            Ok(v) => v,
+            Err(_) => {
+                continue;
+            }
+        };
+
+        return (user, group, visible == 1);
+    }
+    return (String::from("root"), String::from("root"), false);
 }
 
 fn get_samples(libid: i64, user: i64) -> (i64, i64, i64, i64) {

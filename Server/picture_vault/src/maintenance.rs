@@ -64,7 +64,9 @@ pub fn init() {
             add_id(id);
         }
         let pool = database::get_db();
-        let query = database::build_query("SELECT id FROM §§.Media WHERE last_request < ? AND duration >= 0");
+        let query = database::build_query(
+            "SELECT id FROM §§.Media WHERE last_request < ? AND duration >= 0",
+        );
         let mut stmt = pool.prepare(query).unwrap();
         let time = common::current_time_millis() - (24 * 3600 * 1000);
         let result = stmt.execute((time,)).unwrap();
@@ -83,10 +85,10 @@ pub fn init() {
                 }
             };
             let media = match database::get_mediainfo_by_id(id) {
-                Ok(v)   => v,
-                Err(_)  => {
+                Ok(v) => v,
+                Err(_) => {
                     return;
-                },
+                }
             };
             media.cleanup();
         }
@@ -106,10 +108,10 @@ pub fn add_id(id: i64) {
 
 fn make_thumbnail(id: i64) {
     let media = match database::get_mediainfo_by_id(id) {
-        Ok(v)   => v,
-        Err(_)  => {
+        Ok(v) => v,
+        Err(_) => {
             return;
-        },
+        }
     };
     let _ = media.get_thumbnail(false);
 }
@@ -176,15 +178,33 @@ fn do_geocode(id: i64) {
             match reader.read_event(&mut buf) {
                 Ok(Event::Start(ref e)) => {
                     match e.name() {
-                        b"suburb" => {found = true;},
-                        b"city" => {found = true;},
-                        b"county" => {found = true;},
-                        b"town" => {found = true;},
-                        b"village" => {found = true;},
-                        b"state" => {found = true;},
-                        b"neighbourhood" => {found = true;},
-                        b"country" => {found = true;},
-                        b"state_district"   => {found = true;},
+                        b"suburb" => {
+                            found = true;
+                        }
+                        b"city" => {
+                            found = true;
+                        }
+                        b"county" => {
+                            found = true;
+                        }
+                        b"town" => {
+                            found = true;
+                        }
+                        b"village" => {
+                            found = true;
+                        }
+                        b"state" => {
+                            found = true;
+                        }
+                        b"neighbourhood" => {
+                            found = true;
+                        }
+                        b"country" => {
+                            found = true;
+                        }
+                        b"state_district" => {
+                            found = true;
+                        }
                         _ => (),
                     }
                 }

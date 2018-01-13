@@ -127,6 +127,39 @@ pub fn current_time_millis() -> u64 {
 }
 
 
+pub fn change_owner(file: &str, user: &str, group: &str, visible: bool) -> bool {
+    if is_program_not_in_path("chown") {
+        return false;
+    }
+    let userstr = format!("{}:{}", user, group);
+
+    let _ = Command::new("chown")
+        .arg(userstr)
+        .arg(file)
+        .output()
+        .unwrap();
+
+    if is_program_not_in_path("chmod") {
+        return false;
+    }
+
+    let privileges;
+    if visible {
+        privileges = "660"
+    } else {
+        privileges = "600"
+    }
+
+    let _ = Command::new("chmod")
+        .arg(privileges)
+        .arg(file)
+        .output()
+        .unwrap();
+
+    true
+}
+
+
 
 
 pub fn log(file: &str, function: &str, error: &str) {

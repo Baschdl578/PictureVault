@@ -13,6 +13,7 @@ extern crate quick_xml;
 extern crate reqwest;
 extern crate chrono;
 extern crate ascii;
+extern crate futures;
 
 mod media;
 mod database;
@@ -27,7 +28,11 @@ use std::thread;
 fn main() {
     database::init();
     maintenance::init();
-    let addr = format!("{}:{}", common::get_string("server_ip"), common::get_string("server_port"));
+    let addr = format!(
+        "{}:{}",
+        common::get_string("server_ip"),
+        common::get_string("server_port")
+    );
     let server = match tiny_http::Server::http(&addr) {
         Ok(rq) => rq,
         Err(e) => {

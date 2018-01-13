@@ -10,6 +10,10 @@ use std::io::{BufReader, BufRead, Read, Write};
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::str::FromStr;
+use std::thread;
+use futures::Future;
+use futures::sync::oneshot;
+
 
 use database;
 use maintenance;
@@ -24,7 +28,7 @@ pub fn answer(request: http::Request) {
 
     let mut user = String::new();
     let mut pass = String::new();
-    let mut range : u64 = 0;
+    let mut range: u64 = 0;
     {
         let headers = request.headers();
         let mut found = false;
@@ -56,7 +60,8 @@ pub fn answer(request: http::Request) {
                     let length = coded_value.len();
                     let _ = coded_value.split_off(length - 1);
                 } else {
-                    let split: Vec<String> = coded_value.split("-").map(|s| s.to_string()).collect();
+                    let split: Vec<String> =
+                        coded_value.split("-").map(|s| s.to_string()).collect();
                     coded_value = String::new();
                     coded_value.push_str(&split[0]);
                 }
@@ -135,12 +140,12 @@ pub fn answer(request: http::Request) {
             set_lastsync(request, uid);
             return;
         }
-        "/pulse"    => {
+        "/pulse" => {
             echo(request);
             return;
         }
         _ => {
-                url_not_found(request);
+            url_not_found(request);
             return;
         }
     }
@@ -191,16 +196,16 @@ fn get_media_intern(uid: i64, media_id: i64, request: http::Request, range: u64)
         Vec::with_capacity(0),
         file,
         Some(length as usize - range as usize),
-        None
+        None,
     );
 
-    let header = http::Header{
+    let header = http::Header {
         field: http::HeaderField::from_str("Content-Range").unwrap(),
         value: AsciiString::from_str(&format!("bytes {}-{}", range, length)).unwrap(),
     };
     response.add_header(header);
 
-    let header = http::Header{
+    let header = http::Header {
         field: http::HeaderField::from_str("Accept-Ranges").unwrap(),
         value: AsciiString::from_str("none").unwrap(),
     };
@@ -211,7 +216,7 @@ fn get_media_intern(uid: i64, media_id: i64, request: http::Request, range: u64)
 
 pub fn get_media_url(url: String, uid: i64, request: http::Request, range: u64) {
     let string = String::from(url.trim_matches('/'));
-    let values : Vec<&str> = string.split("/").collect::<Vec<&str>>();
+    let values: Vec<&str> = string.split("/").collect::<Vec<&str>>();
     let mut id_str = String::new();
     if values.len() > 2 {
         id_str.push_str(values[2]);
@@ -232,7 +237,7 @@ pub fn get_media_url(url: String, uid: i64, request: http::Request, range: u64) 
 
 pub fn stream_media(url: String, uid: i64, request: http::Request) {
     let string = String::from(url.trim_matches('/'));
-    let values : Vec<&str> = string.split("/").collect::<Vec<&str>>();
+    let values: Vec<&str> = string.split("/").collect::<Vec<&str>>();
     let mut id_str = String::new();
     if values.len() > 3 {
         id_str.push_str(values[2]);
@@ -259,17 +264,21 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
         let mpd_path = pic.get_mpd_path();
         let path = Path::new(&mpd_path);
         let out = match File::open(path) {
-            Ok(v)   => v,
-            Err(_)  => { //Retry once
+            Ok(v) => v,
+            Err(_) => {
+                //Retry once
                 let tmp = match File::open(path) {
-                    Ok(v)   => v,
-                    Err(_)  => {
-                        internal_error(request, format!("Could not open file: {}", &mpd_path).to_string());
+                    Ok(v) => v,
+                    Err(_) => {
+                        internal_error(
+                            request,
+                            format!("Could not open file: {}", &mpd_path).to_string(),
+                        );
                         return;
-                    },
+                    }
                 };
                 tmp
-            },
+            }
         };
         let response = http::Response::from_file(out);
         let _ = request.respond(response);
@@ -282,17 +291,21 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
         filepath.push_str(values[3]);
         let path = Path::new(&filepath);
         let out = match File::open(path) {
-            Ok(v)   => v,
-            Err(_)  => { //Retry once
+            Ok(v) => v,
+            Err(_) => {
+                //Retry once
                 let tmp = match File::open(path) {
-                    Ok(v)   => v,
-                    Err(_)  => {
-                        internal_error(request, format!("Could not open file: {}", &filepath).to_string());
+                    Ok(v) => v,
+                    Err(_) => {
+                        internal_error(
+                            request,
+                            format!("Could not open file: {}", &filepath).to_string(),
+                        );
                         return;
-                    },
+                    }
                 };
                 tmp
-            },
+            }
         };
         let response = http::Response::from_file(out);
         let _ = request.respond(response);
@@ -432,17 +445,18 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
     picpath.push_str(&pic.get_thumbnail(true));
     path = Path::new(&picpath);
     let out = match File::open(path) {
-        Ok(v)   => v,
-        Err(_)  => { //Retry once
+        Ok(v) => v,
+        Err(_) => {
+            //Retry once
             let tmp = match File::open(path) {
-                Ok(v)   => v,
-                Err(_)  => {
+                Ok(v) => v,
+                Err(_) => {
                     internal_error(request, String::from("Could not open file"));
                     return;
-                },
+                }
             };
             tmp
-        },
+        }
     };
     let response = http::Response::from_file(out);
     let _ = request.respond(response);
@@ -461,6 +475,7 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
     let filesize: u64;
     let mut error = false;
     let mut path;
+    let (tx, rx) = oneshot::channel();
     {
         let mut line = String::new();
         let mut reader = BufReader::new(request.as_reader());
@@ -522,6 +537,28 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
         fullpath.push_str(&path);
         fullpath.push_str(&filename);
 
+
+        let path2 = String::from(format!("{}", &path));
+        thread::spawn(move || {
+
+            let id = database::add_media(
+                path2,
+                filename,
+                bucket,
+                created,
+                modified,
+                lat,
+                lon,
+                h_res,
+                v_res,
+                duration,
+                uid,
+            );
+
+            let _ = tx.send(id);
+
+        });
+
         let p = Path::new(&path);
         if !p.exists() {
             match fs::create_dir_all(Path::new(&path)) {
@@ -571,40 +608,35 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
         if !error {
             match f.metadata() {
                 Err(_) => {
-                    let _ = fs::remove_file(fullpath);
+                    let _ = fs::remove_file(format!("{}", &fullpath));
                     error = true;
                 }
                 Ok(v) => {
                     if v.len() != filesize {
-                        match fs::remove_file(fullpath) {
-                            Ok(_)   => {},
-                            Err(_)  => {},
+                        match fs::remove_file(format!("{}", &fullpath)) {
+                            Ok(_) => {}
+                            Err(_) => {}
                         };
                         error = true
                     }
                 }
             };
         }
+
+        let _ = thread::spawn(move || {
+            let (user, group, visible) = database::ownership_info(uid);
+            common::change_owner(&fullpath, &user, &group, visible);
+        });
+
     }
+
 
     if error {
         internal_error(request, String::from("Error creating file"));
         return;
     }
 
-    let id = database::add_media(
-        path,
-        filename,
-        bucket,
-        created,
-        modified,
-        lat,
-        lon,
-        h_res,
-        v_res,
-        duration,
-        uid,
-    );
+    let id = rx.wait().unwrap();
     if id < 0 {
         internal_error(
             request,
@@ -624,20 +656,21 @@ fn sanitize(string: String) -> String {
     let mut out = string;
     out = String::from(out.trim());
     let mut len = out.len();
-    if out.ends_with("\n") {
+    while out.ends_with("\n") {
         let _ = out.split_off(len - 1);
         len -= 1;
     }
-    if out.ends_with("\r") {
+    while out.ends_with("\r") {
         let _ = out.split_off(len - 1);
         len -= 1;
     }
-    if out.ends_with("\\n") {
+    while out.ends_with("\\n") {
         let _ = out.split_off(len - 2);
         len -= 2;
     }
-    if out.ends_with("\\r\\n") {
-        let _ = out.split_off(len - 4);
+    while out.ends_with("\\r") {
+        let _ = out.split_off(len - 2);
+        len -= 2;
     }
     out
 }
@@ -695,7 +728,11 @@ pub fn mediasearch(request: http::Request, uid: i64) {
 }
 
 pub fn internal_error(request: http::Request, message: String) {
-    println!("Internal Error on URL: {} with message: {}", request.url(), &message);
+    println!(
+        "Internal Error on URL: {} with message: {}",
+        request.url(),
+        &message
+    );
     let response =
         http::Response::from_string(message).with_status_code(http::StatusCode::from(500));
     let _ = request.respond(response);
