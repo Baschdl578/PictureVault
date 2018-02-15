@@ -1,287 +1,221 @@
-use tiny_http as http;
 use base64;
 use chrono::prelude::{DateTime, Local};
 use chrono::{TimeZone, Datelike};
 use ascii::AsciiString;
+use actix_web::*;
 
 use std::fs::{self, File};
 use std::path::Path;
-use std::io::{BufReader, BufRead, Read, Write};
+use std::io::{self, BufReader, BufRead, Read, Write};
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::str::FromStr;
 use std::thread;
-use futures::Future;
-use futures::sync::oneshot;
-
+use std::collections::HashMap;
 
 use database;
-use maintenance;
+//use maintenance;
 use common;
 
-pub fn answer(request: http::Request) {
-    if request.url() == "/test/echo" {
-        echo(request);
-        return;
+pub fn answer(req: HttpRequest) -> Result<HttpResponse> {
+    println!("Got url {}", req.uri());
+    Ok(HttpResponse::Ok()
+       .content_type("text/plain")
+       .body(format!("Hello {}!", req.match_info().get("any").unwrap()))?)
+
+    /*
+    if req.path() == "/test/echo" {
+        return echo(req)
     }
-
-
     let mut user = String::new();
     let mut pass = String::new();
     let mut range: u64 = 0;
+    let mut auth_available = false;
     {
-        let headers = request.headers();
-        let mut found = false;
-        for h in headers {
-            let mut field = String::new();
-            field.push_str(h.field.as_str().as_str());
-            if field == "Authorization".to_string() {
-                let mut coded_value = String::new();
-                let mut coded_value1 = String::new();
-                coded_value1.push_str(h.value.as_str());
-                if coded_value1.starts_with("Basic ") {
-                    coded_value = coded_value1.split_off(6);
-                }
-                let bytes = base64::decode(&coded_value).unwrap();
-                let value = String::from_utf8(bytes).unwrap();
-                let split: Vec<String> = value.split(":").map(|s| s.to_string()).collect();
-                user.push_str(&split[0]);
-                pass.push_str(&split[1]);
-            }
-            if field == "Range".to_string() {
-                found = true;
-                let mut coded_value = String::new();
-                let mut coded_value1 = String::new();
-                coded_value1.push_str(h.value.as_str());
-                if coded_value1.starts_with("bytes=") {
-                    coded_value = coded_value1.split_off(6);
-                }
-                if coded_value.ends_with("-") {
-                    let length = coded_value.len();
-                    let _ = coded_value.split_off(length - 1);
-                } else {
-                    let split: Vec<String> =
-                        coded_value.split("-").map(|s| s.to_string()).collect();
-                    coded_value = String::new();
-                    coded_value.push_str(&split[0]);
-                }
-                range = match coded_value.parse::<u64>() {
-                    Ok(n) => n,
-                    Err(_) => 0,
-                };
-                println!("Range request: {}", range);
-            }
-            if found && user.len() > 0 && pass.len() > 0 {
-                break;
-            }
+        let headers = req.headers();
+
+        auth_available = headers.has::<Authorization<header::Basic>>();
+        if auth_available {
+            let auth = headers.get::<Authorization<header::Basic>>().unwrap();
+            user = String::from(format!("{}", &auth.username));
+            pass = match &auth.password {
+                &Some(ref s) => String::from(format!("{}", &s)),
+                _   => String::new(),
+            };
         }
     }
+
     let uid = database::get_user_id_and_verify(&user, &pass);
-    if uid <= 0 {
+    if uid <= 0 || !auth_available {
         let mut message = String::from("Bad Login: ");
         message.push_str(&user);
         message.push_str(" with password: ");
         message.push_str(&pass);
-        message.push_str(&format!(" and URL: {}", request.url()));
+        message.push_str(&format!(" and URL: {}", req.path()));
         println!("{}", &message);
-        let response =
-            http::Response::from_string(message).with_status_code(http::StatusCode::from(401));
-        let _ = request.respond(response);
-        return;
+        let mut response = Response::new();
+        response.set_body(message);
+        response.set_status(hyper::StatusCode::Unauthorized);
+        return Box::new(futures::future::ok(response))
     }
 
-    if request.url().starts_with("/media/load/") {
-        get_media_url(String::from(request.url()), uid, request, range);
-        return;
+    if req.path().starts_with("/media/load/") {
+        return get_media_url(String::from(req.path()), uid, req)
     }
-    if request.url().starts_with("/media/stream/") {
-        stream_media(String::from(request.url()), uid, request);
-        return;
-    }
-
-    match request.url() {
+    if req.path().starts_with("/media/stream/") {
+        return stream_media(String::from(req.path()), uid, req)
+    } */
+/*
+    match req.path() {
         "/test/echo" => {
-            echo(request);
-            return;
+            return echo(req);
         }
         "/library/all" => {
-            get_libs(request, uid);
-            return;
+            return get_libs(req, uid);
         }
         "/library/media" => {
-            get_lib_mediaids(request, uid);
-            return;
+            return get_lib_mediaids(req, uid);
         }
         "/media/thumb" => {
-            get_mediathumb(request, uid);
-            return;
+            return get_mediathumb(req, uid);
         }
         "/media/info" => {
-            get_mediainfo(request, uid);
-            return;
+            return get_mediainfo(req, uid);
         }
         "/media/load" => {
-            get_media_stream(request, uid, range);
-            return;
+            return get_media_stream(req, uid);
         }
         "/media/upload" => {
-            mediaupload(request, uid);
-            return;
+            return mediaupload(req, uid);
+        }
+        "/media/upload/ios" => {
+            return mediaupload_form(req, uid);
         }
         "/media/search" => {
-            mediasearch(request, uid);
-            return;
+            return mediasearch(req, uid);
         }
         "/lastsync/get" => {
-            get_lastsync(request, uid);
-            return;
+            return get_lastsync(req, uid);
         }
         "/lastsync/set" => {
-            set_lastsync(request, uid);
-            return;
+            return set_lastsync(req, uid);
         }
         "/pulse" => {
-            echo(request);
-            return;
+            return echo(req);
         }
         _ => {
-            url_not_found(request);
-            return;
+            return url_not_found(req);
         }
-    }
+    } */
+    //return url_not_found(req);
+} /*
+
+pub fn echo(req: Request) -> Box<Future<Item = Response, Error = hyper::Error>> {
+    let mut response = Response::new();
+    response.set_body(req.body());
+    Box::new(futures::future::ok(response))
 }
 
-pub fn echo(mut request: http::Request) {
-    let mut string = String::new();
-    {
-        let reader = request.as_reader();
-        let _ = reader.read_to_string(&mut string);
-    }
-    let response = http::Response::from_string(string);
-    let _ = request.respond(response);
-}
-
-fn get_media_intern(uid: i64, media_id: i64, request: http::Request, range: u64) {
+fn get_media_intern(uid: i64, media_id: i64, req: Request) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let mut picpath = String::new();
-    let path;
     let pic = match database::get_mediainfo(uid, media_id) {
         Ok(p) => p,
         Err(_) => {
-            gone(request);
-            return;
+            return gone()
         }
     };
     picpath.push_str(&pic.get_full_path());
-    path = Path::new(&picpath);
 
-    let mut file = File::open(path).unwrap();
-
-    let length = file.metadata().unwrap().len();
-
-    let mut status = http::StatusCode(200);
-    let mut response;
-    if range > 0 {
-        status = http::StatusCode(206);
-    }
-    if range >= length {
-        status = http::StatusCode(416);
-    }
-
-    if range > 0 {
-        file.seek(SeekFrom::Start(range)).unwrap();
-    }
-
-    response = http::Response::new(
-        status,
-        Vec::with_capacity(0),
-        file,
-        Some(length as usize - range as usize),
-        None,
-    );
-
-    let header = http::Header {
-        field: http::HeaderField::from_str("Content-Range").unwrap(),
-        value: AsciiString::from_str(&format!("bytes {}-{}", range, length)).unwrap(),
-    };
-    response.add_header(header);
-
-    let header = http::Header {
-        field: http::HeaderField::from_str("Accept-Ranges").unwrap(),
-        value: AsciiString::from_str("none").unwrap(),
-    };
-    response.add_header(header);
-
-    let _ = request.respond(response);
+    response_from_file(&picpath)
 }
 
-pub fn get_media_url(url: String, uid: i64, request: http::Request, range: u64) {
+fn response_from_file(path: &str) -> Box<Future<Item = Response, Error = hyper::Error>> {
+    let (tx, rx) = oneshot::channel();
+    let mypath = String::from(path);
+    thread::spawn(move || {
+	    let not_found: &[u8] = b"not found";
+        let mut file = match File::open(mypath) {
+            Ok(f) => f,
+            Err(_) => {
+                tx.send(Response::new()
+                        .with_status(hyper::StatusCode::NotFound)
+                        .with_header(ContentLength(not_found.len() as u64))
+                        .with_body(not_found))
+                    .expect("Send error on open");
+                return;
+            },
+        };
+        let (mut tx_body, rx_body) = mpsc::channel(1);
+        let res = Response::new().with_body(rx_body);
+        tx.send(res).expect("Send error on successful file read");
+
+        let mut buf = [0u8; 4096];
+        loop {
+            match file.read(&mut buf) {
+                Ok(n) => {
+                    if n == 0 {
+                        // eof
+                        tx_body.close().expect("panic closing");
+                        break;
+                    } else {
+                        let chunk: hyper::Chunk = buf.to_vec().into();
+                        match tx_body.send(Ok(chunk)).wait() {
+                            Ok(t) => { tx_body = t; },
+                            Err(_) => { break; }
+                        };
+                    }
+                },
+                Err(_) => { break; }
+            }
+        }
+    });
+    Box::new(rx.map_err(|e| hyper::Error::from(io::Error::new(io::ErrorKind::Other, e))))
+}
+
+pub fn get_media_url(url: String, uid: i64, request: Request) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let string = String::from(url.trim_matches('/'));
     let values: Vec<&str> = string.split("/").collect::<Vec<&str>>();
     let mut id_str = String::new();
     if values.len() > 2 {
         id_str.push_str(values[2]);
     } else {
-        internal_error(request, String::from("Could not read media id"));
-        return;
+        return internal_error(request, String::from("Could not read media id"))
     }
     let id = match id_str.parse::<i64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read media id"));
-            return;
+            return internal_error(request, String::from("Could not read media id"))
         }
     };
-    get_media_intern(uid, id, request, range);
+    get_media_intern(uid, id, request)
 }
 
 
-pub fn stream_media(url: String, uid: i64, request: http::Request) {
+pub fn stream_media(url: String, uid: i64, request: Request) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let string = String::from(url.trim_matches('/'));
     let values: Vec<&str> = string.split("/").collect::<Vec<&str>>();
     let mut id_str = String::new();
     if values.len() > 3 {
         id_str.push_str(values[2]);
     } else {
-        internal_error(request, String::from("Could not read media id"));
-        return;
+        return internal_error(request, String::from("Could not read media id"));
     }
     let id = match id_str.parse::<i64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read media id"));
-            return;
+            return internal_error(request, String::from("Could not read media id"));
         }
     };
     let pic = match database::get_mediainfo(uid, id) {
         Ok(p) => p,
         Err(_) => {
-            gone(request);
-            return;
+            return gone();
         }
     };
 
     if values[3] == "mpd" {
         let mpd_path = pic.get_mpd_path();
-        let path = Path::new(&mpd_path);
-        let out = match File::open(path) {
-            Ok(v) => v,
-            Err(_) => {
-                //Retry once
-                let tmp = match File::open(path) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        internal_error(
-                            request,
-                            format!("Could not open file: {}", &mpd_path).to_string(),
-                        );
-                        return;
-                    }
-                };
-                tmp
-            }
-        };
-        let response = http::Response::from_file(out);
-        let _ = request.respond(response);
+        return response_from_file(&mpd_path);
     } else {
         pic.prepare_for_streaming();
         let mut filepath = pic.get_streaming_path();
@@ -289,50 +223,29 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
             filepath.push('/');
         }
         filepath.push_str(values[3]);
-        let path = Path::new(&filepath);
-        let out = match File::open(path) {
-            Ok(v) => v,
-            Err(_) => {
-                //Retry once
-                let tmp = match File::open(path) {
-                    Ok(v) => v,
-                    Err(_) => {
-                        internal_error(
-                            request,
-                            format!("Could not open file: {}", &filepath).to_string(),
-                        );
-                        return;
-                    }
-                };
-                tmp
-            }
-        };
-        let response = http::Response::from_file(out);
-        let _ = request.respond(response);
+        return response_from_file(&filepath);
     }
 }
 
 
-pub fn get_media_stream(mut request: http::Request, uid: i64, range: u64) {
+pub fn get_media_stream(request: Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let mut id_str: String = String::new();
-    {
-        let mut reader = BufReader::new(request.as_reader());
-        let _ = reader.read_line(&mut id_str);
+    //let (_, _, _, headers, mut reader) = request.deconstruct();
+    //let nodes = mime_multipart::read_multipart_body(&mut reader, &headers, false).unwrap();
+    let multipart = request.into_multipart().unwrap();
 
-    }
+
     let id = match id_str.parse::<i64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read picture id"));
-            return;
+            return internal_error(request, String::from("Could not read picture id"));
         }
     };
-    get_media_intern(uid, id, request, range);
-
+    return get_media_intern(uid, id, request);
 }
-
-
-pub fn get_libs(request: http::Request, uid: i64) {
+*/
+/*
+pub fn get_libs(request: Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let libs = database::get_libs(uid);
     let iter = libs.into_iter();
     let mut out = String::new();
@@ -362,7 +275,7 @@ pub fn get_libs(request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
-pub fn get_lib_mediaids(mut request: http::Request, uid: i64) {
+pub fn get_lib_mediaids(mut request: http::Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let mut id_str = String::new();
     {
         let mut reader = BufReader::new(request.as_reader());
@@ -392,7 +305,7 @@ pub fn get_lib_mediaids(mut request: http::Request, uid: i64) {
 }
 
 
-pub fn get_mediainfo(mut request: http::Request, uid: i64) {
+pub fn get_mediainfo(mut request: http::Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let mut id: String = String::new();
     let media;
     {
@@ -419,7 +332,7 @@ pub fn get_mediainfo(mut request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
-pub fn get_mediathumb(mut request: http::Request, uid: i64) {
+pub fn get_mediathumb(mut request: http::Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let mut picpath = String::new();
     let path;
     let mut id: String = String::new();
@@ -462,7 +375,34 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
-pub fn mediaupload(mut request: http::Request, uid: i64) {
+
+pub fn mediaupload_form(mut request: http::Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
+    let bucket: String;
+    let filename: String;
+    let lat: f64;
+    let lon: f64;
+    let created: u64;
+    let modified: u64;
+    let duration: i64;
+    let h_res: u64;
+    let v_res: u64;
+    let filesize: u64;
+    let mut path = String::new();
+    {
+        let mut reader = request.as_reader();
+        let form_data = formdata::read_formdata(&mut reader, &hyper::header::Headers::new()).unwrap();
+
+        for (name, value) in form_data.fields {
+            println!("Posted field name={} value={}", name, value);
+        }
+
+        for (name, file) in form_data.files {
+            println!("Posted file name={} path={:?}", name, file.path);
+        }
+    }
+}
+
+pub fn mediaupload(mut request: http::Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let mut bucket = String::new();
     let mut filename = String::new();
     let lat: f64;
@@ -474,8 +414,8 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
     let v_res: u64;
     let filesize: u64;
     let mut error = false;
-    let mut path;
-    let (tx, rx) = oneshot::channel();
+    let path;
+
     {
         let mut line = String::new();
         let mut reader = BufReader::new(request.as_reader());
@@ -521,43 +461,10 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
         line = sanitize(line);
         filesize = line.parse::<u64>().unwrap();
 
-        path = database::get_userpath(uid);
-        if !path.ends_with('/') {
-            path.push('/');
-        }
-        if created > 0 {
-            path.push_str(&build_path(created, &bucket));
-        } else {
-            path.push_str(&build_path(modified, &bucket));
-        }
-        if !path.ends_with('/') {
-            path.push('/');
-        }
+        path = build_path(uid, created, modified, &bucket);
         let mut fullpath = String::new();
         fullpath.push_str(&path);
         fullpath.push_str(&filename);
-
-
-        let path2 = String::from(format!("{}", &path));
-        thread::spawn(move || {
-
-            let id = database::add_media(
-                path2,
-                filename,
-                bucket,
-                created,
-                modified,
-                lat,
-                lon,
-                h_res,
-                v_res,
-                duration,
-                uid,
-            );
-
-            let _ = tx.send(id);
-
-        });
 
         let p = Path::new(&path);
         if !p.exists() {
@@ -565,6 +472,26 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
                 Err(_) => error = true,
                 Ok(_) => {}
             };
+            let mut tmp_path: String = String::from(format!("{}", &path));
+            let _ = thread::spawn(move || {
+                if !tmp_path.ends_with('/') {
+                    tmp_path.push('/');
+                }
+                let (user, group, visible) = database::ownership_info(uid);
+                let mut userpath = String::from(database::get_userpath(uid));
+                if userpath.ends_with('/') {
+                    userpath.push('/');
+                }
+                while tmp_path.len() > userpath.len() {
+                    common::change_owner(&tmp_path, &user, &group, visible);
+                    let pathcopy = String::from(format!("{}", &tmp_path));
+                    let tmp: Vec<&str> = pathcopy.rsplitn(3, '/').collect();
+                    tmp_path = String::from(format!("{}", tmp[2]));
+                    if !tmp_path.ends_with('/') {
+                        tmp_path.push('/');
+                    }
+                }
+            });
         }
         let mut f: File = match File::create(Path::new(&fullpath)) {
             Ok(v) => v,
@@ -636,7 +563,21 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
         return;
     }
 
-    let id = rx.wait().unwrap();
+    let path = String::from(format!("{}", &path));
+    let id = database::add_media(
+        path,
+        filename,
+        bucket,
+        created,
+        modified,
+        lat,
+        lon,
+        h_res,
+        v_res,
+        duration,
+        uid,
+    );
+
     if id < 0 {
         internal_error(
             request,
@@ -650,6 +591,23 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
     maintenance::add_id(id);
     let response = http::Response::from_string(id.to_string());
     let _ = request.respond(response);
+}
+
+
+fn build_path(uid: i64, created: u64, modified: u64, bucket: &str) -> String {
+    let mut path = database::get_userpath(uid);
+    if !path.ends_with('/') {
+        path.push('/');
+    }
+    if created > 0 {
+        path.push_str(&build_path_date(created, bucket));
+    } else {
+        path.push_str(&build_path_date(modified, bucket));
+    }
+    if !path.ends_with('/') {
+        path.push('/');
+    }
+    path
 }
 
 fn sanitize(string: String) -> String {
@@ -675,7 +633,7 @@ fn sanitize(string: String) -> String {
     out
 }
 
-fn build_path(created: u64, bucket: &str) -> String {
+fn build_path_date(created: u64, bucket: &str) -> String {
     let date: DateTime<Local> =
         Local.timestamp((created / 1000) as i64, ((created % 1000) * 1000000) as u32);
     let year = date.year();
@@ -697,13 +655,13 @@ fn build_path(created: u64, bucket: &str) -> String {
     String::from(format!("{}/{} {}/{}/", year, month_nr, month_text, bucket))
 }
 
-pub fn get_lastsync(request: http::Request, uid: i64) {
+pub fn get_lastsync(request: http::Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let response =
         http::Response::from_string(String::from(database::get_lastsync(uid).to_string()));
     let _ = request.respond(response);
 }
 
-pub fn set_lastsync(mut request: http::Request, uid: i64) {
+pub fn set_lastsync(mut request: http::Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let lastsync: u64;
     let mut read_string = String::new();
     {
@@ -722,30 +680,35 @@ pub fn set_lastsync(mut request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
-pub fn mediasearch(request: http::Request, uid: i64) {
+pub fn mediasearch(request: http::Request, uid: i64) -> Box<Future<Item = Response, Error = hyper::Error>> {
     let _ = uid + 1;
     internal_error(request, String::from("Feature not implemented yet"));
 }
 
-pub fn internal_error(request: http::Request, message: String) {
+pub fn internal_error(request: Request, message: String) -> Box<Future<Item = Response, Error = hyper::Error>> {
     println!(
         "Internal Error on URL: {} with message: {}",
-        request.url(),
+        request.path(),
         &message
     );
-    let response =
-        http::Response::from_string(message).with_status_code(http::StatusCode::from(500));
-    let _ = request.respond(response);
+    let mut response = Response::new();
+    response.set_body(message);
+    response.set_status(hyper::StatusCode::InternalServerError);
+
+    Box::new(futures::future::ok(response))
 }
 
-pub fn gone(request: http::Request) {
-    let response = http::Response::from_string("Object not found, it is probably gone")
-        .with_status_code(http::StatusCode::from(410));
-    let _ = request.respond(response);
+pub fn gone() -> Box<Future<Item = Response, Error = hyper::Error>> {
+    let mut response = Response::new();
+    response.set_status(hyper::StatusCode::Gone);
+
+    Box::new(futures::future::ok(response))
 }
 
-pub fn url_not_found(request: http::Request) {
-    let response = http::Response::from_string("URL not found")
-        .with_status_code(http::StatusCode::from(404));
-    let _ = request.respond(response);
-}
+pub fn url_not_found(request: Request) -> Box<Future<Item = Response, Error = hyper::Error>> {
+    let mut response = Response::new();
+    response.set_body(format!("URL not found: {}", request.path()));
+    response.set_status(hyper::StatusCode::NotFound);
+
+    Box::new(futures::future::ok(response))
+} */
