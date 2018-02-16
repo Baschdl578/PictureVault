@@ -3,6 +3,11 @@ use base64;
 use chrono::prelude::{DateTime, Local};
 use chrono::{TimeZone, Datelike};
 use ascii::AsciiString;
+use futures::Future;
+use futures::sync::oneshot;
+use multipart::server::{Multipart, Entries, SaveResult, SavedField};
+use multipart::server::tiny_http::TinyHttpRequest;
+
 
 use std::fs::{self, File};
 use std::path::Path;
@@ -11,9 +16,6 @@ use std::io::Seek;
 use std::io::SeekFrom;
 use std::str::FromStr;
 use std::thread;
-use futures::Future;
-use futures::sync::oneshot;
-
 
 use database;
 use maintenance;
@@ -462,6 +464,23 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
+fn mediaupload_multipart(mut request: http::Request, uid: i64) {
+    let mut bucket = String::new();
+    let mut filename = String::new();
+    let lat: f64;
+    let lon: f64;
+    let created: u64;
+    let modified: u64;
+    let duration: i64;
+    let h_res: u64;
+    let v_res: u64;
+    let filesize: u64;
+    let mut error = false;
+    let mut path;
+    let (tx, rx) = oneshot::channel();
+
+}
+
 pub fn mediaupload(mut request: http::Request, uid: i64) {
     let mut bucket = String::new();
     let mut filename = String::new();
@@ -521,18 +540,7 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
         line = sanitize(line);
         filesize = line.parse::<u64>().unwrap();
 
-        path = database::get_userpath(uid);
-        if !path.ends_with('/') {
-            path.push('/');
-        }
-        if created > 0 {
-            path.push_str(&build_path(created, &bucket));
-        } else {
-            path.push_str(&build_path(modified, &bucket));
-        }
-        if !path.ends_with('/') {
-            path.push('/');
-        }
+        path = build_path(uid, created, modified, &bucket);
         let mut fullpath = String::new();
         fullpath.push_str(&path);
         fullpath.push_str(&filename);
@@ -652,6 +660,26 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
+fn build_path(uid: i64, created: u64, modified: u64, bucket: &str) -> String {
+    let mut path = database::get_userpath(uid);
+    if !path.ends_with('/') {
+        path.push('/');
+    }
+    if created > 0 {
+        path.push_str(&build_path_date(created, bucket));
+    } else {
+        path.push_str(&build_path_date(modified, bucket));
+    }
+    if !path.ends_with('/') {
+        path.push('/');
+    }
+    path
+}
+
+fn create_path(path: &str) {
+
+}
+
 fn sanitize(string: String) -> String {
     let mut out = string;
     out = String::from(out.trim());
@@ -675,7 +703,7 @@ fn sanitize(string: String) -> String {
     out
 }
 
-fn build_path(created: u64, bucket: &str) -> String {
+fn build_path_date(created: u64, bucket: &str) -> String {
     let date: DateTime<Local> =
         Local.timestamp((created / 1000) as i64, ((created % 1000) * 1000000) as u32);
     let year = date.year();

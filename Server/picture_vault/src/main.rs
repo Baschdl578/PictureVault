@@ -14,6 +14,8 @@ extern crate reqwest;
 extern crate chrono;
 extern crate ascii;
 extern crate futures;
+extern crate multipart;
+extern crate mime_multipart;
 
 mod media;
 mod database;
