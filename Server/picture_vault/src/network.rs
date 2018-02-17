@@ -5,10 +5,9 @@ use chrono::{Datelike, TimeZone};
 use ascii::AsciiString;
 use futures::Future;
 use futures::sync::oneshot;
-use multipart::server::{Entries, Multipart, SaveResult, SavedField};
-use multipart::server::tiny_http::TinyHttpRequest;
-use multipart::server::save::SavedData;
-use multipart::save::TempDir;
+use multipart::server::{Entries, Multipart, SaveResult};
+use multipart::server::save::{SaveDir, SavedData, TempDir};
+use fs_extra::file::{move_file, CopyOptions};
 
 use std::fs::{self, File};
 use std::path::Path;
@@ -124,6 +123,10 @@ pub fn answer(request: http::Request) {
         }
         "/media/upload" => {
             mediaupload(request, uid);
+            return;
+        }
+        "/media/upload/ios" => {
+            mediaupload_multipart(request, uid);
             return;
         }
         "/media/search" => {
@@ -455,10 +458,13 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
 }
 
 fn mediaupload_multipart(mut request: http::Request, uid: i64) {
-    let mut tmp_path = database::get_userpath(uid);
-    let tmp_dir = TempDir::new_in(tmp_path, ".tmp");
+    let tmp_path = database::get_userpath(uid);
+    let tmp_dir = TempDir::new_in(&tmp_path, ".tmp").unwrap();
 
-    let entries;
+    let mut entries = Entries::new(SaveDir::Temp(TempDir::new(&tmp_path).unwrap()));
+
+    let mut error = false;
+    let mut not_multipart = false;
 
     match Multipart::from_request(&mut request) {
         Ok(mut multipart) => {
@@ -470,26 +476,26 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
                     entries = entr;
                 }
                 _ => {
-                    internal_error(request, String::from("Multipart data corrupt"));
-                    return;
+                    error = true;
                 }
             }
         }
         Err(_) => {
-            internal_error(request, String::from("The request is not multipart"));
-            return;
+            not_multipart = true;
         }
     }
+
+    if not_multipart {
+        internal_error(request, String::from("Request is not multipart"));
+        return;
+    }
+    if error {
+        internal_error(request, String::from("Multipart data corrupt"));
+        return;
+    }
+
     let bucket = extract_from_form(&entries, "bucket");
     let filename = extract_from_form(&entries, "filename");
-    let lat = match extract_from_form(&entries, "latitude").parse::<f64>() {
-        Ok(v) => v,
-        Err(_) => 0.0,
-    };
-    let lon = match extract_from_form(&entries, "longitude").parse::<f64>() {
-        Ok(v) => v,
-        Err(_) => 0.0,
-    };
     let created = match extract_from_form(&entries, "created").parse::<u64>() {
         Ok(v) => v,
         Err(_) => 0,
@@ -497,6 +503,14 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
     let modified = match extract_from_form(&entries, "modified").parse::<u64>() {
         Ok(v) => v,
         Err(_) => 0,
+    };
+    let lat = match extract_from_form(&entries, "latitude").parse::<f64>() {
+        Ok(v) => v,
+        Err(_) => 0.0,
+    };
+    let lon = match extract_from_form(&entries, "longitude").parse::<f64>() {
+        Ok(v) => v,
+        Err(_) => 0.0,
     };
     let duration = match extract_from_form(&entries, "duration").parse::<i64>() {
         Ok(v) => v,
@@ -515,12 +529,11 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
         Err(_) => 0,
     };
 
-    let mut error = false;
-
-    path = build_path(uid, created, modified, &bucket);
+    let path = build_path(uid, created, modified, &bucket);
 
     let path2 = String::from(format!("{}", &path));
     let filename2 = String::from(format!("{}", &filename));
+    let (tx, rx) = oneshot::channel::<i64>();
     thread::spawn(move || {
         let id = database::add_media(
             path2,
@@ -535,7 +548,7 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
             duration,
             uid,
         );
-        tx.send(id);
+        let _ = tx.send(id);
     });
 
     let mut fullpath = String::new();
@@ -544,46 +557,19 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
 
     error = create_dirs(&path, uid);
 
-    let mut f: File = match File::create(Path::new(&fullpath)) {
+    let _ = move_file(
+        extract_from_form(&entries, "file"),
+        &fullpath,
+        &CopyOptions::new(),
+    );
+
+    let f: File = match File::open(Path::new(&fullpath)) {
         Ok(v) => v,
         Err(_) => {
             error = true;
             File::open("/tmp/dummy").unwrap()
         }
     };
-    if !error {
-        let mut buf: [u8; 32 * 1024] = [0; 32 * 1024];
-        loop {
-            let length = match reader.read(&mut buf) {
-                Ok(n) => n,
-                Err(_) => buf.len() + 1,
-            };
-            if length == 0 {
-                break;
-            }
-            if length > buf.len() {
-                let mut f_name_copy = String::new(); //need to copy, remove_file moves fullpath
-                f_name_copy.push_str(&fullpath);
-                let _ = fs::remove_file(f_name_copy);
-                error = true;
-                break;
-            }
-            if !error {
-                match f.write_all(&buf[0..length]) {
-                    Err(_) => {
-                        let mut f_name_copy = String::new(); //need to copy, remove_file moves fullpath
-                        f_name_copy.push_str(&fullpath);
-                        let _ = fs::remove_file(f_name_copy);
-                        error = true;
-                        break;
-                    }
-                    Ok(_) => {
-                        continue;
-                    }
-                };
-            }
-        }
-    }
 
     if !error {
         match f.metadata() {
@@ -632,8 +618,11 @@ fn extract_from_form(entries: &Entries, key: &str) -> String {
     let data = entries.fields.get(&Arc::new(String::from(key))).unwrap();
     for i in 0..data.len() {
         match data[i].data {
-            SavedData::Text(string) => {
-                return string;
+            SavedData::Text(ref string) => {
+                return String::from(format!("{}", string));
+            }
+            SavedData::File(ref path_buf, _) => {
+                return String::from(format!("{}", path_buf.as_path().to_str().unwrap()));
             }
             _ => {
                 continue;
@@ -720,7 +709,7 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
                 duration,
                 uid,
             );
-            tx.send(id);
+            let _ = tx.send(id);
         });
 
         let mut fullpath = String::new();

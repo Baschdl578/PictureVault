@@ -391,23 +391,6 @@ impl Media {
         }
     }
 
-    fn remove_extension(&self) -> String {
-        let fullpath = &self.get_full_path();
-        let file = Path::new(fullpath).file_stem().unwrap().to_str().unwrap();
-        let mut path = String::from(
-            Path::new(&self.get_full_path())
-                .parent()
-                .unwrap()
-                .to_str()
-                .unwrap(),
-        );
-        if !path.ends_with("/") {
-            path.push('/');
-        }
-        path.push_str(file);
-        path
-    }
-
     fn remove_extension_and_hide(&self) -> String {
         let fullpath = &self.get_full_path();
         let file = Path::new(fullpath).file_stem().unwrap().to_str().unwrap();
@@ -640,5 +623,24 @@ mod test {
 
         let _ = fs::remove_file(pic.get_thumbname(true));
         let _ = fs::remove_file(pic.get_thumbname(false));
+    }
+
+    impl Media {
+        fn remove_extension(&self) -> String {
+            let fullpath = &self.get_full_path();
+            let file = Path::new(fullpath).file_stem().unwrap().to_str().unwrap();
+            let mut path = String::from(
+                Path::new(&self.get_full_path())
+                    .parent()
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+            );
+            if !path.ends_with("/") {
+                path.push('/');
+            }
+            path.push_str(file);
+            path
+        }
     }
 }

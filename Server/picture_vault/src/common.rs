@@ -137,11 +137,20 @@ pub fn change_owner(file: &str, user: &str, group: &str, visible: bool) -> bool 
         return false;
     }
 
+    let is_dir = File::open(file).unwrap().metadata().unwrap().is_dir();
     let privileges;
-    if visible {
-        privileges = "660"
+    if is_dir {
+        if visible {
+            privileges = "770"
+        } else {
+            privileges = "700"
+        }
     } else {
-        privileges = "600"
+        if visible {
+            privileges = "660"
+        } else {
+            privileges = "600"
+        }
     }
 
     let _ = Command::new("chmod")
