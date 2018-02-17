@@ -1,21 +1,21 @@
-extern crate mysql;
+extern crate ascii;
+extern crate base64;
+extern crate chrono;
+extern crate futures;
 extern crate image;
-extern crate rexiv2;
 #[macro_use]
 extern crate lazy_static;
-extern crate tiny_http;
-extern crate base64;
-extern crate rand;
-extern crate two_lock_queue as tlq;
-extern crate num_cpus;
-extern crate time;
-extern crate quick_xml;
-extern crate reqwest;
-extern crate chrono;
-extern crate ascii;
-extern crate futures;
-extern crate multipart;
 extern crate mime_multipart;
+extern crate multipart;
+extern crate mysql;
+extern crate num_cpus;
+extern crate quick_xml;
+extern crate rand;
+extern crate reqwest;
+extern crate rexiv2;
+extern crate time;
+extern crate tiny_http;
+extern crate two_lock_queue as tlq;
 
 mod media;
 mod database;
@@ -25,7 +25,6 @@ mod maintenance;
 
 use std::sync::Arc;
 use std::thread;
-
 
 fn main() {
     database::init();

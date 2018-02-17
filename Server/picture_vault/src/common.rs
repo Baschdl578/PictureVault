@@ -1,4 +1,4 @@
-use std::io::{BufReader, BufRead};
+use std::io::{BufRead, BufReader};
 use std::fs::File;
 use std::path::Path;
 use std::collections::HashMap;
@@ -12,7 +12,6 @@ use time;
 lazy_static! {
     static ref MAP : Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
 }
-
 
 pub fn make_hashmap_intern(testing: bool) {
     let mut hashmap = MAP.lock().unwrap();
@@ -57,7 +56,6 @@ pub fn make_hashmap_intern(testing: bool) {
     }
 }
 
-
 fn get_string_intern(key: &str, testing: bool) -> String {
     make_hashmap_intern(testing);
     let hashmap = MAP.lock().unwrap();
@@ -73,12 +71,9 @@ fn get_string_intern(key: &str, testing: bool) -> String {
     }
 }
 
-
-
 pub fn get_string(key: &str) -> String {
     return get_string_intern(key, false);
 }
-
 
 pub fn get_int(key: &str) -> i32 {
     let out = get_string(key);
@@ -126,7 +121,6 @@ pub fn current_time_millis() -> u64 {
     now
 }
 
-
 pub fn change_owner(file: &str, user: &str, group: &str, visible: bool) -> bool {
     if is_program_not_in_path("chown") {
         return false;
@@ -159,25 +153,19 @@ pub fn change_owner(file: &str, user: &str, group: &str, visible: bool) -> bool 
     true
 }
 
-
-
-
 pub fn log(file: &str, function: &str, error: &str) {
     let _ = file;
     let _ = function;
     let _ = error;
 }
 
-
 #[cfg(test)]
 mod test {
 
     #[test]
     fn get_string_test() {
-
         assert_eq!(super::get_string_intern("test2", true), "test11");
         super::MAP.lock().unwrap().clear();
-
     }
 
 }

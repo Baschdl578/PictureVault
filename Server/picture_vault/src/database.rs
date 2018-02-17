@@ -23,10 +23,7 @@ fn make_db() -> sql::Pool {
 
     let connection: String = String::from(format!(
         "mysql://{}:{}@{}:{}",
-        db_user,
-        db_pass,
-        db_addr,
-        db_port
+        db_user, db_pass, db_addr, db_port
     ));
 
     return sql::Pool::new(connection).unwrap();
@@ -58,7 +55,6 @@ pub fn init() {
     let mut stmt = pool.prepare(build_query("CREATE DATABASE IF NOT EXISTS §§;"))
         .unwrap();
     let _ = stmt.execute(()).unwrap();
-
 
     let mut stmt = pool.prepare(build_query(
         "CREATE TABLE IF NOT EXISTS §§.Library (id INT NOT NULL AUTO_INCREMENT,
@@ -144,7 +140,6 @@ pub fn get_libs(user: i64) -> LinkedList<(i64, String, u64, (i64, i64, i64, i64)
     let mut list: LinkedList<(i64, String, u64, (i64, i64, i64, i64))> = LinkedList::new();
     let mut list2: LinkedList<(i64, String, u64, (i64, i64, i64, i64))> = LinkedList::new();
 
-
     for row in result {
         let naked_row = match row {
             Err(_) => {
@@ -163,9 +158,9 @@ pub fn get_libs(user: i64) -> LinkedList<(i64, String, u64, (i64, i64, i64, i64)
 
         let count = get_media_count(id, user);
 
-        if name == "Camera" || name == "Kamera" || name == "WhatsApp Images" ||
-            name == "Instagram" || name == "Google Fotos" || name == "OneDrive" ||
-            name == "Messenger" || name == "PhotoDirector"
+        if name == "Camera" || name == "Kamera" || name == "WhatsApp Images" || name == "Instagram"
+            || name == "Google Fotos" || name == "OneDrive" || name == "Messenger"
+            || name == "PhotoDirector"
         {
             list2.push_back((id, name, count, samples));
         } else {
@@ -213,9 +208,7 @@ fn get_media_count(id: i64, user: i64) -> u64 {
 
 pub fn ownership_info(user: i64) -> (String, String, bool) {
     let pool = get_db();
-    let query = build_query(
-        "SELECT os_user, os_group, group_visible FROM §§.Users WHERE id = ?",
-    );
+    let query = build_query("SELECT os_user, os_group, group_visible FROM §§.Users WHERE id = ?");
     let mut stmt = pool.prepare(query).unwrap();
     let result = stmt.execute((user,)).unwrap();
 
@@ -315,13 +308,11 @@ fn get_samples(libid: i64, user: i64) -> (i64, i64, i64, i64) {
         return (id, id2, id3, id4);
     }
 
-
     let mut rng = thread_rng();
     let num1: usize = rng.gen_range(0, (count / 4) - 1);
     let num2: usize = rng.gen_range(count / 4, (count / 2) - 1);
     let num3: usize = rng.gen_range(count / 2, (3 * count / 4) - 1);
     let num4: usize = rng.gen_range(3 * count / 4, count - 1);
-
 
     let id1 = list[num1];
     let id2 = list[num2];
@@ -384,7 +375,6 @@ pub fn get_userpath(uid: i64) -> String {
             }
         };
         return out;
-
     }
     return String::new();
 }
@@ -394,7 +384,6 @@ fn add_library(bucket: &String) {
     let query = build_query("INSERT IGNORE INTO §§.Library (name) VALUES (?);");
     let mut stmt = pool.prepare(query).unwrap();
     let _ = stmt.execute((bucket,)).unwrap();
-
 }
 
 pub fn add_media(
@@ -452,7 +441,6 @@ pub fn add_media(
         size,
     )).unwrap();
 
-
     let pool = get_db();
     let query = build_query("SELECT id FROM §§.Media WHERE path = ? AND filename = ?;");
     let mut stmt = pool.prepare(query).unwrap();
@@ -473,10 +461,8 @@ pub fn add_media(
             }
         };
         return id;
-
     }
     return -1;
-
 }
 
 fn get_lib_id_from_name(lib_name: String) -> i64 {
@@ -500,22 +486,16 @@ fn get_lib_id_from_name(lib_name: String) -> i64 {
             }
         };
         return id;
-
     }
     return -1;
-
 }
-
 
 pub fn get_mediainfo(user: i64, mediaid: i64) -> Result<Media, i16> {
     let pool = get_db();
-    let query = build_query(
-        "UPDATE §§.Media SET last_request = ? WHERE id = ? AND user = ?;",
-    );
+    let query = build_query("UPDATE §§.Media SET last_request = ? WHERE id = ? AND user = ?;");
     let mut stmt = pool.prepare(query).unwrap();
     let _ = stmt.execute((common::current_time_millis(), mediaid, user))
         .unwrap();
-
 
     let pool = get_db();
     let query = build_query(

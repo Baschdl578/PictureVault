@@ -1,33 +1,29 @@
 use tiny_http as http;
 use base64;
 use chrono::prelude::{DateTime, Local};
-use chrono::{TimeZone, Datelike};
+use chrono::{Datelike, TimeZone};
 use ascii::AsciiString;
 use futures::Future;
 use futures::sync::oneshot;
-use multipart::server::{Multipart, Entries, SaveResult, SavedField};
+use multipart::server::{Entries, Multipart, SaveResult, SavedField};
 use multipart::server::tiny_http::TinyHttpRequest;
-
+use multipart::server::save::SavedData;
+use multipart::save::TempDir;
 
 use std::fs::{self, File};
 use std::path::Path;
-use std::io::{BufReader, BufRead, Read, Write};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::str::FromStr;
 use std::thread;
+use std::sync::Arc;
 
 use database;
 use maintenance;
 use common;
 
 pub fn answer(request: http::Request) {
-    if request.url() == "/test/echo" {
-        echo(request);
-        return;
-    }
-
-
     let mut user = String::new();
     let mut pass = String::new();
     let mut range: u64 = 0;
@@ -236,7 +232,6 @@ pub fn get_media_url(url: String, uid: i64, request: http::Request, range: u64) 
     get_media_intern(uid, id, request, range);
 }
 
-
 pub fn stream_media(url: String, uid: i64, request: http::Request) {
     let string = String::from(url.trim_matches('/'));
     let values: Vec<&str> = string.split("/").collect::<Vec<&str>>();
@@ -314,13 +309,11 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
     }
 }
 
-
 pub fn get_media_stream(mut request: http::Request, uid: i64, range: u64) {
     let mut id_str: String = String::new();
     {
         let mut reader = BufReader::new(request.as_reader());
         let _ = reader.read_line(&mut id_str);
-
     }
     let id = match id_str.parse::<i64>() {
         Ok(n) => n,
@@ -330,9 +323,7 @@ pub fn get_media_stream(mut request: http::Request, uid: i64, range: u64) {
         }
     };
     get_media_intern(uid, id, request, range);
-
 }
-
 
 pub fn get_libs(request: http::Request, uid: i64) {
     let libs = database::get_libs(uid);
@@ -392,7 +383,6 @@ pub fn get_lib_mediaids(mut request: http::Request, uid: i64) {
     let response = http::Response::from_string(out);
     let _ = request.respond(response);
 }
-
 
 pub fn get_mediainfo(mut request: http::Request, uid: i64) {
     let mut id: String = String::new();
@@ -465,20 +455,192 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
 }
 
 fn mediaupload_multipart(mut request: http::Request, uid: i64) {
-    let mut bucket = String::new();
-    let mut filename = String::new();
-    let lat: f64;
-    let lon: f64;
-    let created: u64;
-    let modified: u64;
-    let duration: i64;
-    let h_res: u64;
-    let v_res: u64;
-    let filesize: u64;
-    let mut error = false;
-    let mut path;
-    let (tx, rx) = oneshot::channel();
+    let mut tmp_path = database::get_userpath(uid);
+    let tmp_dir = TempDir::new_in(tmp_path, ".tmp");
 
+    let entries;
+
+    match Multipart::from_request(&mut request) {
+        Ok(mut multipart) => {
+            // Fetching all data and processing it.
+            // save().temp() reads the request fully, parsing all fields and saving all files
+            // in a new temporary directory under the OS temporary directory.
+            match multipart.save().with_temp_dir(tmp_dir) {
+                SaveResult::Full(entr) => {
+                    entries = entr;
+                }
+                _ => {
+                    internal_error(request, String::from("Multipart data corrupt"));
+                    return;
+                }
+            }
+        }
+        Err(_) => {
+            internal_error(request, String::from("The request is not multipart"));
+            return;
+        }
+    }
+    let bucket = extract_from_form(&entries, "bucket");
+    let filename = extract_from_form(&entries, "filename");
+    let lat = match extract_from_form(&entries, "latitude").parse::<f64>() {
+        Ok(v) => v,
+        Err(_) => 0.0,
+    };
+    let lon = match extract_from_form(&entries, "longitude").parse::<f64>() {
+        Ok(v) => v,
+        Err(_) => 0.0,
+    };
+    let created = match extract_from_form(&entries, "created").parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => 0,
+    };
+    let modified = match extract_from_form(&entries, "modified").parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => 0,
+    };
+    let duration = match extract_from_form(&entries, "duration").parse::<i64>() {
+        Ok(v) => v,
+        Err(_) => -1,
+    };
+    let h_res = match extract_from_form(&entries, "horizontal resolution").parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => 0,
+    };
+    let v_res = match extract_from_form(&entries, "vartical resolution").parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => 0,
+    };
+    let filesize = match extract_from_form(&entries, "filesize").parse::<u64>() {
+        Ok(v) => v,
+        Err(_) => 0,
+    };
+
+    let mut error = false;
+
+    path = build_path(uid, created, modified, &bucket);
+
+    let path2 = String::from(format!("{}", &path));
+    let filename2 = String::from(format!("{}", &filename));
+    thread::spawn(move || {
+        let id = database::add_media(
+            path2,
+            filename2,
+            bucket,
+            created,
+            modified,
+            lat,
+            lon,
+            h_res,
+            v_res,
+            duration,
+            uid,
+        );
+        tx.send(id);
+    });
+
+    let mut fullpath = String::new();
+    fullpath.push_str(&path);
+    fullpath.push_str(&filename);
+
+    error = create_dirs(&path, uid);
+
+    let mut f: File = match File::create(Path::new(&fullpath)) {
+        Ok(v) => v,
+        Err(_) => {
+            error = true;
+            File::open("/tmp/dummy").unwrap()
+        }
+    };
+    if !error {
+        let mut buf: [u8; 32 * 1024] = [0; 32 * 1024];
+        loop {
+            let length = match reader.read(&mut buf) {
+                Ok(n) => n,
+                Err(_) => buf.len() + 1,
+            };
+            if length == 0 {
+                break;
+            }
+            if length > buf.len() {
+                let mut f_name_copy = String::new(); //need to copy, remove_file moves fullpath
+                f_name_copy.push_str(&fullpath);
+                let _ = fs::remove_file(f_name_copy);
+                error = true;
+                break;
+            }
+            if !error {
+                match f.write_all(&buf[0..length]) {
+                    Err(_) => {
+                        let mut f_name_copy = String::new(); //need to copy, remove_file moves fullpath
+                        f_name_copy.push_str(&fullpath);
+                        let _ = fs::remove_file(f_name_copy);
+                        error = true;
+                        break;
+                    }
+                    Ok(_) => {
+                        continue;
+                    }
+                };
+            }
+        }
+    }
+
+    if !error {
+        match f.metadata() {
+            Err(_) => {
+                let _ = fs::remove_file(format!("{}", &fullpath));
+                error = true;
+            }
+            Ok(v) => {
+                if v.len() != filesize {
+                    match fs::remove_file(format!("{}", &fullpath)) {
+                        Ok(_) => {}
+                        Err(_) => {}
+                    };
+                    error = true
+                }
+            }
+        };
+    }
+
+    let _ = thread::spawn(move || {
+        let (user, group, visible) = database::ownership_info(uid);
+        common::change_owner(&fullpath, &user, &group, visible);
+    });
+
+    if error {
+        internal_error(request, String::from("Error creating file"));
+        return;
+    }
+
+    let id: i64 = rx.wait().unwrap();
+
+    if id < 0 {
+        internal_error(
+            request,
+            String::from("Error adding file to database, it was created successfully though"),
+        );
+        return;
+    }
+
+    maintenance::add_id(id);
+    let response = http::Response::from_string(id.to_string());
+    let _ = request.respond(response);
+}
+
+fn extract_from_form(entries: &Entries, key: &str) -> String {
+    let data = entries.fields.get(&Arc::new(String::from(key))).unwrap();
+    for i in 0..data.len() {
+        match data[i].data {
+            SavedData::Text(string) => {
+                return string;
+            }
+            _ => {
+                continue;
+            }
+        }
+    }
+    return String::new();
 }
 
 pub fn mediaupload(mut request: http::Request, uid: i64) {
@@ -492,9 +654,9 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
     let h_res: u64;
     let v_res: u64;
     let filesize: u64;
-    let mut error = false;
-    let mut path;
-    let (tx, rx) = oneshot::channel();
+    let mut error: bool;
+    let path;
+    let (tx, rx) = oneshot::channel::<i64>();
     {
         let mut line = String::new();
         let mut reader = BufReader::new(request.as_reader());
@@ -541,17 +703,13 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
         filesize = line.parse::<u64>().unwrap();
 
         path = build_path(uid, created, modified, &bucket);
-        let mut fullpath = String::new();
-        fullpath.push_str(&path);
-        fullpath.push_str(&filename);
-
 
         let path2 = String::from(format!("{}", &path));
+        let filename2 = String::from(format!("{}", &filename));
         thread::spawn(move || {
-
             let id = database::add_media(
                 path2,
-                filename,
+                filename2,
                 bucket,
                 created,
                 modified,
@@ -562,18 +720,15 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
                 duration,
                 uid,
             );
-
-            let _ = tx.send(id);
-
+            tx.send(id);
         });
 
-        let p = Path::new(&path);
-        if !p.exists() {
-            match fs::create_dir_all(Path::new(&path)) {
-                Err(_) => error = true,
-                Ok(_) => {}
-            };
-        }
+        let mut fullpath = String::new();
+        fullpath.push_str(&path);
+        fullpath.push_str(&filename);
+
+        error = create_dirs(&path, uid);
+
         let mut f: File = match File::create(Path::new(&fullpath)) {
             Ok(v) => v,
             Err(_) => {
@@ -581,35 +736,37 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
                 File::open("/tmp/dummy").unwrap()
             }
         };
-        let mut buf: [u8; 32 * 1024] = [0; 32 * 1024];
-        loop {
-            let length = match reader.read(&mut buf) {
-                Ok(n) => n,
-                Err(_) => buf.len() + 1,
-            };
-            if length == 0 {
-                break;
-            }
-            if length > buf.len() {
-                let mut f_name_copy = String::new(); //need to copy, remove_file moves fullpath
-                f_name_copy.push_str(&fullpath);
-                let _ = fs::remove_file(f_name_copy);
-                error = true;
-                break;
-            }
-            if !error {
-                match f.write_all(&buf[0..length]) {
-                    Err(_) => {
-                        let mut f_name_copy = String::new(); //need to copy, remove_file moves fullpath
-                        f_name_copy.push_str(&fullpath);
-                        let _ = fs::remove_file(f_name_copy);
-                        error = true;
-                        break;
-                    }
-                    Ok(_) => {
-                        continue;
-                    }
+        if !error {
+            let mut buf: [u8; 32 * 1024] = [0; 32 * 1024];
+            loop {
+                let length = match reader.read(&mut buf) {
+                    Ok(n) => n,
+                    Err(_) => buf.len() + 1,
                 };
+                if length == 0 {
+                    break;
+                }
+                if length > buf.len() {
+                    let mut f_name_copy = String::new(); //need to copy, remove_file moves fullpath
+                    f_name_copy.push_str(&fullpath);
+                    let _ = fs::remove_file(f_name_copy);
+                    error = true;
+                    break;
+                }
+                if !error {
+                    match f.write_all(&buf[0..length]) {
+                        Err(_) => {
+                            let mut f_name_copy = String::new(); //need to copy, remove_file moves fullpath
+                            f_name_copy.push_str(&fullpath);
+                            let _ = fs::remove_file(f_name_copy);
+                            error = true;
+                            break;
+                        }
+                        Ok(_) => {
+                            continue;
+                        }
+                    };
+                }
             }
         }
 
@@ -635,22 +792,19 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
             let (user, group, visible) = database::ownership_info(uid);
             common::change_owner(&fullpath, &user, &group, visible);
         });
-
     }
-
 
     if error {
         internal_error(request, String::from("Error creating file"));
         return;
     }
 
-    let id = rx.wait().unwrap();
+    let id: i64 = rx.wait().unwrap();
+
     if id < 0 {
         internal_error(
             request,
-            String::from(
-                "Error adding file to database, it was created successfully though",
-            ),
+            String::from("Error adding file to database, it was created successfully though"),
         );
         return;
     }
@@ -658,6 +812,38 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
     maintenance::add_id(id);
     let response = http::Response::from_string(id.to_string());
     let _ = request.respond(response);
+}
+
+fn create_dirs(path: &str, uid: i64) -> bool {
+    let mut error = false;
+    let p = Path::new(&path);
+    if !p.exists() {
+        match fs::create_dir_all(Path::new(&path)) {
+            Err(_) => error = true,
+            Ok(_) => {}
+        };
+        let mut tmp_path: String = String::from(format!("{}", &path));
+        let _ = thread::spawn(move || {
+            if !tmp_path.ends_with('/') {
+                tmp_path.push('/');
+            }
+            let (user, group, visible) = database::ownership_info(uid);
+            let mut userpath = String::from(database::get_userpath(uid));
+            if userpath.ends_with('/') {
+                userpath.push('/');
+            }
+            while tmp_path.len() > userpath.len() {
+                common::change_owner(&tmp_path, &user, &group, visible);
+                let pathcopy = String::from(format!("{}", &tmp_path));
+                let tmp: Vec<&str> = pathcopy.rsplitn(3, '/').collect();
+                tmp_path = String::from(format!("{}", tmp[2]));
+                if !tmp_path.ends_with('/') {
+                    tmp_path.push('/');
+                }
+            }
+        });
+    }
+    error
 }
 
 fn build_path(uid: i64, created: u64, modified: u64, bucket: &str) -> String {
@@ -674,10 +860,6 @@ fn build_path(uid: i64, created: u64, modified: u64, bucket: &str) -> String {
         path.push('/');
     }
     path
-}
-
-fn create_path(path: &str) {
-
 }
 
 fn sanitize(string: String) -> String {
@@ -773,7 +955,7 @@ pub fn gone(request: http::Request) {
 }
 
 pub fn url_not_found(request: http::Request) {
-    let response = http::Response::from_string("URL not found")
-        .with_status_code(http::StatusCode::from(404));
+    let response =
+        http::Response::from_string("URL not found").with_status_code(http::StatusCode::from(404));
     let _ = request.respond(response);
 }

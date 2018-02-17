@@ -30,7 +30,6 @@ lazy_static! {
     static ref LAST_GEOCODE : Mutex<u64> = Mutex::new(0);
 }
 
-
 pub fn init() {
     let cpus = num_cpus::get();
     for _ in 0..cpus {
@@ -93,18 +92,13 @@ pub fn init() {
             media.cleanup();
         }
 
-
-
-
         thread::sleep(stdtime::Duration::from_secs(12 * 3600));
     });
 }
 
-
 pub fn add_id(id: i64) {
     PROD_CONS.lock().unwrap().tx.clone().send(id).unwrap();
 }
-
 
 fn make_thumbnail(id: i64) {
     let media = match database::get_mediainfo_by_id(id) {
@@ -115,8 +109,6 @@ fn make_thumbnail(id: i64) {
     };
     let _ = media.get_thumbnail(false);
 }
-
-
 
 fn do_geocode(id: i64) {
     let pool = database::get_db();
@@ -143,9 +135,7 @@ fn do_geocode(id: i64) {
             continue;
         }
         let mut url = String::new();
-        url.push_str(
-            "https://nominatim.openstreetmap.org/reverse?format=xml&lat=",
-        );
+        url.push_str("https://nominatim.openstreetmap.org/reverse?format=xml&lat=");
         url.push_str(&lat.to_string());
         url.push_str("&lon=");
         url.push_str(&long.to_string());
@@ -176,38 +166,36 @@ fn do_geocode(id: i64) {
         // The `Reader` does not implement `Iterator` because it outputs borrowed data (`Cow`s)
         loop {
             match reader.read_event(&mut buf) {
-                Ok(Event::Start(ref e)) => {
-                    match e.name() {
-                        b"suburb" => {
-                            found = true;
-                        }
-                        b"city" => {
-                            found = true;
-                        }
-                        b"county" => {
-                            found = true;
-                        }
-                        b"town" => {
-                            found = true;
-                        }
-                        b"village" => {
-                            found = true;
-                        }
-                        b"state" => {
-                            found = true;
-                        }
-                        b"neighbourhood" => {
-                            found = true;
-                        }
-                        b"country" => {
-                            found = true;
-                        }
-                        b"state_district" => {
-                            found = true;
-                        }
-                        _ => (),
+                Ok(Event::Start(ref e)) => match e.name() {
+                    b"suburb" => {
+                        found = true;
                     }
-                }
+                    b"city" => {
+                        found = true;
+                    }
+                    b"county" => {
+                        found = true;
+                    }
+                    b"town" => {
+                        found = true;
+                    }
+                    b"village" => {
+                        found = true;
+                    }
+                    b"state" => {
+                        found = true;
+                    }
+                    b"neighbourhood" => {
+                        found = true;
+                    }
+                    b"country" => {
+                        found = true;
+                    }
+                    b"state_district" => {
+                        found = true;
+                    }
+                    _ => (),
+                },
                 Ok(Event::Text(e)) => {
                     if found {
                         let pool = database::get_db();
@@ -221,7 +209,7 @@ fn do_geocode(id: i64) {
                     }
                 }
                 Ok(Event::Eof) => break, // exits the loop when reaching end of file
-                _ => (), // There are several other `Event`s we do not consider here
+                _ => (),                 // There are several other `Event`s we do not consider here
             }
 
             // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low

@@ -1,5 +1,5 @@
 use image;
-use image::{GenericImage, imageops};
+use image::{imageops, GenericImage};
 use rexiv2;
 
 use std::path::Path;
@@ -9,7 +9,6 @@ use std::fs;
 use std::process::Command;
 
 use common;
-
 
 pub struct Media {
     pub id: i64,
@@ -68,7 +67,6 @@ impl Media {
             self.make_video_thumbnail(time_sensitive);
         }
         return String::from(self.get_thumbname(time_sensitive));
-
     }
 
     fn calc_duration(&self) -> f64 {
@@ -99,7 +97,6 @@ impl Media {
             }
         };
         length
-
     }
 
     pub fn cleanup(&self) {
@@ -200,7 +197,6 @@ impl Media {
 
         duration = duration / 2.0;
 
-
         let tmpfile = format!("{}_tmp.jpg", self.get_full_path());
 
         let _ = Command::new("ffmpeg")
@@ -218,7 +214,8 @@ impl Media {
         let img = match image::open(&Path::new(&tmpfile)) {
             Ok(v) => v,
             Err(_) => {
-                let tmp = match image::open(&Path::new(&tmpfile)) { //Retry once
+                let tmp = match image::open(&Path::new(&tmpfile)) {
+                    //Retry once
                     Ok(v) => v,
                     Err(_) => {
                         println!("Error opening file: {}", &tmpfile);
@@ -297,15 +294,12 @@ impl Media {
         }
     }
 
-
-
-
-
     fn make_picture_thumbnail(&self, time_sensitive: bool) {
         let img = match image::open(&Path::new(&self.get_full_path())) {
             Ok(v) => v,
             Err(_) => {
-                let tmp = match image::open(&Path::new(&self.get_full_path())) { //Retry once
+                let tmp = match image::open(&Path::new(&self.get_full_path())) {
+                    //Retry once
                     Ok(v) => v,
                     Err(_) => {
                         println!("Error opening file: {}", &self.get_full_path());
@@ -388,7 +382,6 @@ impl Media {
         fullpath
     }
 
-
     fn get_rotation(&self) -> rexiv2::Orientation {
         let meta = rexiv2::Metadata::new_from_path(&self.get_full_path()).unwrap();
         if meta.supports_exif() {
@@ -439,7 +432,6 @@ impl Media {
         }
         return format!("{}_350.jpg", self.remove_extension_and_hide());
     }
-
 
     pub fn new(
         id: i64,
@@ -496,8 +488,6 @@ impl Media {
     }
 }
 
-
-
 #[cfg(test)]
 mod test {
     use super::Media;
@@ -544,8 +534,8 @@ mod test {
             last_request: common::current_time_millis(),
         };
 
-        let file1: File = File::open(format!("{}_350_nearest.jpg", landscape.remove_extension()))
-            .unwrap();
+        let file1: File =
+            File::open(format!("{}_350_nearest.jpg", landscape.remove_extension())).unwrap();
         let mut buf_reader1 = BufReader::new(file1);
         let mut contents1 = String::new();
         let _ = buf_reader1.read_to_string(&mut contents1);
@@ -556,8 +546,8 @@ mod test {
         let _ = buf_reader2.read_to_string(&mut contents2);
         assert_eq!(contents1, contents2);
 
-        let file1: File = File::open(format!("{}_350_lanczos3.jpg", landscape.remove_extension()))
-            .unwrap();
+        let file1: File =
+            File::open(format!("{}_350_lanczos3.jpg", landscape.remove_extension())).unwrap();
         let mut buf_reader1 = BufReader::new(file1);
         let mut contents1 = String::new();
         let _ = buf_reader1.read_to_string(&mut contents1);
@@ -570,8 +560,8 @@ mod test {
 
         let _ = portrait.make_picture_thumbnail(true);
 
-        let file1: File = File::open(format!("{}_350_nearest.jpg", portrait.remove_extension()))
-            .unwrap();
+        let file1: File =
+            File::open(format!("{}_350_nearest.jpg", portrait.remove_extension())).unwrap();
         let mut buf_reader1 = BufReader::new(file1);
         let mut contents1 = String::new();
         let _ = buf_reader1.read_to_string(&mut contents1);
@@ -584,8 +574,8 @@ mod test {
 
         let _ = portrait.make_picture_thumbnail(false);
 
-        let file1: File = File::open(format!("{}_350_lanczos3.jpg", portrait.remove_extension()))
-            .unwrap();
+        let file1: File =
+            File::open(format!("{}_350_lanczos3.jpg", portrait.remove_extension())).unwrap();
         let mut buf_reader1 = BufReader::new(file1);
         let mut contents1 = String::new();
         let _ = buf_reader1.read_to_string(&mut contents1);
