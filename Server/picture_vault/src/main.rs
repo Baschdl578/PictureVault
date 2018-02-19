@@ -42,9 +42,10 @@ fn main() {
         }
     };
     let server = Arc::new(server);
-    let mut guards = Vec::with_capacity(4);
+    let cpus = num_cpus::get();
+    let mut guards = Vec::with_capacity(cpus);
 
-    for _ in 0..4 {
+    for _ in 0..cpus {
         let server = server.clone();
 
         let guard = thread::spawn(move || loop {
