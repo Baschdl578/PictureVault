@@ -6,7 +6,7 @@ use ascii::AsciiString;
 use futures::Future;
 use futures::sync::oneshot;
 use multipart::server::{Entries, Multipart, SaveResult};
-use multipart::server::save::{SaveDir, SavedData, TempDir};
+use multipart::server::save::{PartialReason, SaveDir, SavedData, TempDir};
 use fs_extra::file::{move_file, CopyOptions};
 
 use std::fs::{self, File};
@@ -17,6 +17,7 @@ use std::io::SeekFrom;
 use std::str::FromStr;
 use std::thread;
 use std::sync::Arc;
+use std::error::Error;
 
 use database;
 use maintenance;
@@ -459,11 +460,13 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
 
 fn mediaupload_multipart(mut request: http::Request, uid: i64) {
     let tmp_path = database::get_userpath(uid);
+    create_dirs(&tmp_path, uid);
     let tmp_dir = TempDir::new_in(&tmp_path, ".tmp").unwrap();
 
     let mut entries = Entries::new(SaveDir::Temp(TempDir::new(&tmp_path).unwrap()));
 
     let mut error = false;
+    let mut message = format!("Multipart data corrupt");
     let mut not_multipart = false;
 
     match Multipart::from_request(&mut request) {
@@ -475,7 +478,23 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
                 SaveResult::Full(entr) => {
                     entries = entr;
                 }
-                _ => {
+                SaveResult::Error(e) => {
+                    message = format!("Error parsing multipart: {}", e.description());
+                    error = true;
+                }
+                SaveResult::Partial(_, reason) => {
+                    match reason {
+                        PartialReason::CountLimit => {
+                            message = format!("Partial because count limit")
+                        }
+                        PartialReason::SizeLimit => message = format!("Partial because size limit"),
+                        PartialReason::IoError(e) => {
+                            message = format!("Partial because io error: {}", e.description())
+                        }
+                        PartialReason::Utf8Error(e) => {
+                            message = format!("Partial because utf8 error: {}", e)
+                        }
+                    }
                     error = true;
                 }
             }
@@ -490,7 +509,7 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
         return;
     }
     if error {
-        internal_error(request, String::from("Multipart data corrupt"));
+        internal_error(request, message);
         return;
     }
 
@@ -520,11 +539,11 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
         Ok(v) => v,
         Err(_) => 0,
     };
-    let v_res = match extract_from_form(&entries, "vartical resolution").parse::<u64>() {
+    let v_res = match extract_from_form(&entries, "vertical resolution").parse::<u64>() {
         Ok(v) => v,
         Err(_) => 0,
     };
-    let filesize = match extract_from_form(&entries, "filesize").parse::<u64>() {
+    let filesize = match extract_from_form(&entries, "size").parse::<u64>() {
         Ok(v) => v,
         Err(_) => 0,
     };
