@@ -123,6 +123,7 @@ pub fn current_time_millis() -> u64 {
 
 pub fn change_owner(file: &str, user: &str, group: &str, visible: bool) -> bool {
     if is_program_not_in_path("chown") {
+        println!("Could not find chown");
         return false;
     }
     let userstr = format!("{}:{}", user, group);
@@ -134,6 +135,7 @@ pub fn change_owner(file: &str, user: &str, group: &str, visible: bool) -> bool 
         .unwrap();
 
     if is_program_not_in_path("chmod") {
+        println!("Could not find chmod");
         return false;
     }
 
