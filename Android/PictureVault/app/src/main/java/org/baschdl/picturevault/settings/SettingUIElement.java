@@ -103,6 +103,7 @@ public class SettingUIElement extends RelativeLayout implements View.OnClickList
         if (settingObject.isHidden()) {
             ((TextView) this.findViewById(R.id.setting)).setTransformationMethod(PasswordTransformationMethod.getInstance());
         }
+        this.findViewById(R.id.switcher).setVisibility(View.GONE);
 
     }
 
