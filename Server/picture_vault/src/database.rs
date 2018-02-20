@@ -6,6 +6,7 @@ use std::collections::LinkedList;
 use std::fs::File;
 use rand::{thread_rng, Rng};
 use std::sync::Mutex;
+use std::thread;
 
 lazy_static! {
     static ref DB : Mutex<sql::Pool> = Mutex::new(make_db());
@@ -21,10 +22,7 @@ fn make_db() -> sql::Pool {
     let db_addr: String = common::get_string("db_address");
     let db_port: i32 = common::get_int("db_port");
 
-    let connection: String = String::from(format!(
-        "mysql://{}:{}@{}:{}",
-        db_user, db_pass, db_addr, db_port
-    ));
+    let connection: String = format!("mysql://{}:{}@{}:{}", db_user, db_pass, db_addr, db_port);
 
     return sql::Pool::new(connection).unwrap();
 }
@@ -565,7 +563,7 @@ pub fn get_mediainfo(user: i64, mediaid: i64) -> Result<Media, i16> {
             Ok(v) => v,
             _ => 0,
         };
-        return Ok(Media::new(
+        return match Media::new(
             id,
             path,
             filename,
@@ -577,9 +575,31 @@ pub fn get_mediainfo(user: i64, mediaid: i64) -> Result<Media, i16> {
             v_res,
             duration,
             last_request,
-        ));
+        ) {
+            Ok(m) => Ok(m),
+            Err(_) => Err(-2),
+        };
     }
     return Err(1);
+}
+
+pub fn remove_by_id(mediaid: i64) {
+    thread::spawn(move || {
+        let pool = get_db();
+        let query = build_query(
+            "DELETE FROM §§.Media
+        WHERE id = ?",
+        );
+        let mut stmt = pool.prepare(query).unwrap();
+        let _ = stmt.execute((mediaid,)).unwrap();
+
+        let query = build_query(
+            "DELETE FROM §§.Places
+        WHERE picture = ?",
+        );
+        let mut stmt = pool.prepare(query).unwrap();
+        let _ = stmt.execute((mediaid,)).unwrap();
+    });
 }
 
 pub fn get_mediainfo_by_id(mediaid: i64) -> Result<Media, i16> {
@@ -651,7 +671,7 @@ pub fn get_mediainfo_by_id(mediaid: i64) -> Result<Media, i16> {
             Ok(v) => v,
             _ => 0,
         };
-        return Ok(Media::new(
+        return match Media::new(
             id,
             path,
             filename,
@@ -663,7 +683,10 @@ pub fn get_mediainfo_by_id(mediaid: i64) -> Result<Media, i16> {
             v_res,
             duration,
             last_request,
-        ));
+        ) {
+            Ok(m) => Ok(m),
+            Err(_) => Err(-2),
+        };
     }
     return Err(1);
 }
@@ -694,8 +717,10 @@ pub fn get_lastsync(uid: i64) -> u64 {
 }
 
 pub fn set_lastsync(uid: i64, lastsync: u64) {
-    let pool = get_db();
-    let query = build_query("UPDATE §§.Users SET lastsync = ? WHERE id = ?");
-    let mut stmt = pool.prepare(query).unwrap();
-    let _ = stmt.execute((lastsync, uid)).unwrap();
+    thread::spawn(move || {
+        let pool = get_db();
+        let query = build_query("UPDATE §§.Users SET lastsync = ? WHERE id = ?");
+        let mut stmt = pool.prepare(query).unwrap();
+        let _ = stmt.execute((lastsync, uid)).unwrap();
+    });
 }

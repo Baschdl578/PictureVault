@@ -6,9 +6,11 @@ use std::path::Path;
 use std::cmp::min;
 use std::fs::File;
 use std::fs;
+use std::io::ErrorKind;
 use std::process::Command;
 
 use common;
+use database;
 
 pub struct Media {
     pub id: i64,
@@ -428,16 +430,25 @@ impl Media {
         v_resolution: u64,
         duration: i64,
         last_request: u64,
-    ) -> Media {
+    ) -> Result<Media, i16> {
         let mut fullpath: String = String::new();
         fullpath.push_str(&path);
         if !fullpath.ends_with("/") {
             fullpath.push_str("/")
         }
         fullpath.push_str(&filename);
-        let size = File::open(fullpath).unwrap().metadata().unwrap().len();
+        let size = match File::open(fullpath) {
+            Ok(f) => f.metadata().unwrap().len(),
+            Err(e) => {
+                if e.kind() == ErrorKind::NotFound {
+                    database::remove_by_id(id);
+                    return Err(-1);
+                }
+                return Err(-2);
+            }
+        };
 
-        Media {
+        Ok(Media {
             id: id,
             longitude: latitude,
             latitude: longitude,
@@ -450,7 +461,7 @@ impl Media {
             duration: duration,
             size: size,
             last_request: last_request,
-        }
+        })
     }
 
     pub fn to_string(&self) -> String {

@@ -550,8 +550,8 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
 
     let path = build_path(uid, created, modified, &bucket);
 
-    let path2 = String::from(format!("{}", &path));
-    let filename2 = String::from(format!("{}", &filename));
+    let path2 = format!("{}", &path);
+    let filename2 = format!("{}", &filename);
     let (tx, rx) = oneshot::channel::<i64>();
     thread::spawn(move || {
         let id = database::add_media(
@@ -638,10 +638,10 @@ fn extract_from_form(entries: &Entries, key: &str) -> String {
     for i in 0..data.len() {
         match data[i].data {
             SavedData::Text(ref string) => {
-                return String::from(format!("{}", string));
+                return format!("{}", string);
             }
             SavedData::File(ref path_buf, _) => {
-                return String::from(format!("{}", path_buf.as_path().to_str().unwrap()));
+                return format!("{}", path_buf.as_path().to_str().unwrap());
             }
             _ => {
                 continue;
@@ -712,8 +712,8 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
 
         path = build_path(uid, created, modified, &bucket);
 
-        let path2 = String::from(format!("{}", &path));
-        let filename2 = String::from(format!("{}", &filename));
+        let path2 = format!("{}", &path);
+        let filename2 = format!("{}", &filename);
         thread::spawn(move || {
             let id = database::add_media(
                 path2,
@@ -825,29 +825,35 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
 fn create_dirs(path: &str, uid: i64) -> bool {
     let mut error = false;
     let p = Path::new(&path);
+    let mut userpath = String::from(database::get_userpath(uid));
+    if userpath.ends_with('/') {
+        userpath.push('/');
+    }
+    let user_p = Path::new(&path);
+    let user_p_exists = user_p.exists();
     if !p.exists() {
         match fs::create_dir_all(Path::new(&path)) {
             Err(_) => error = true,
             Ok(_) => {}
         };
-        let mut tmp_path: String = String::from(format!("{}", &path));
+        let mut tmp_path: String = format!("{}", &path);
         let _ = thread::spawn(move || {
             if !tmp_path.ends_with('/') {
                 tmp_path.push('/');
             }
             let (user, group, visible) = database::ownership_info(uid);
-            let mut userpath = String::from(database::get_userpath(uid));
-            if userpath.ends_with('/') {
-                userpath.push('/');
-            }
-            while tmp_path.len() > userpath.len() {
+
+            while tmp_path.len() > userpath.len() && tmp_path != "/" {
                 common::change_owner(&tmp_path, &user, &group, visible);
-                let pathcopy = String::from(format!("{}", &tmp_path));
+                let pathcopy = format!("{}", &tmp_path);
                 let tmp: Vec<&str> = pathcopy.rsplitn(3, '/').collect();
-                tmp_path = String::from(format!("{}", tmp[2]));
+                tmp_path = format!("{}", tmp[2]);
                 if !tmp_path.ends_with('/') {
                     tmp_path.push('/');
                 }
+            }
+            if !user_p_exists {
+                common::change_owner(&userpath, &user, &group, visible);
             }
         });
     }
@@ -912,7 +918,7 @@ fn build_path_date(created: u64, bucket: &str) -> String {
         month_nr.push('0');
     }
     month_nr.push_str(&month.to_string());
-    String::from(format!("{}/{} {}/{}/", year, month_nr, month_text, bucket))
+    format!("{}/{} {}/{}/", year, month_nr, month_text, bucket)
 }
 
 pub fn get_lastsync(request: http::Request, uid: i64) {
@@ -936,7 +942,7 @@ pub fn set_lastsync(mut request: http::Request, uid: i64) {
         }
     };
     database::set_lastsync(uid, lastsync);
-    let response = http::Response::from_string(String::from("Successfully set"));
+    let response = http::Response::from_string(String::from("Success"));
     let _ = request.respond(response);
 }
 
