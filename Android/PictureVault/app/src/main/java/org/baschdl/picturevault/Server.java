@@ -310,16 +310,26 @@ public class Server {
         return loadMedia(context, id, name, true);
     }
 
-
     public static Long uploadFile(Context context, File file, String bucket, Long created, Long modified, Double latitude, Double longitude, Long h_res, Long v_res, Long duration, Long filesize, long totalSize, long startProgress, int totalItems, int currentItem, PendingIntent intent) {
-        if (!file.exists() || !file.isFile()) return -1L;
+        return uploadFile(context, file, bucket, created, modified, latitude, longitude, h_res, v_res, duration, filesize, totalSize, startProgress, totalItems, currentItem, intent, true);
+    }
+
+
+    public static Long uploadFile(Context context, File file, String bucket, Long created, Long modified, Double latitude, Double longitude, Long h_res, Long v_res, Long duration, Long filesize, long totalSize, long startProgress, int totalItems, int currentItem, PendingIntent intent, boolean reportSize) {
+        Log.i("Server", "Upload File: " + file.getAbsolutePath());
+        if (!file.exists() || !file.isFile()) {
+            Log.i("Server", "Could not find file");
+            return -1L;
+        }
         FileLock lock = null;
         FileChannel channel = null;
+        boolean locked = true;
         try {
             channel = new RandomAccessFile(file, "rw").getChannel();
             lock = channel.lock();
         } catch (IOException e) {
-            return -1L;
+            Log.i("Server", "Could not get file lock");
+            locked = false;
         }
         String addr = "http://" + SettingsManager.getStringValue(context, SettingsManager.SETTING_SERVERADDRESS) + ":" + SettingsManager.getStringValue(context, SettingsManager.SETTING_SERVERPORT) + "/media/upload";
         HttpURLConnection connection = connect(context, addr);
@@ -354,13 +364,15 @@ public class Server {
             int read = fIn.read(buffer);
             while (read > 0 && !MediaSync.getInstance(context).isCanceled()) {
                 size += read;
-                if (!MediaSync.getInstance(context).updateNotification(context, totalItems, totalSize, currentItem, size, intent)) {
-                    return -1L;
+                if (reportSize) {
+                    if (!MediaSync.getInstance(context).updateNotification(context, totalItems, totalSize, currentItem, size, intent)) {
+                        return -1L;
+                    }
                 }
                 output.write(buffer, 0, read);
                 read = fIn.read(buffer);
             }
-            lock.release();
+            if (locked) lock.release();
             output.flush();
             output.close();
         } catch (IOException e) {
@@ -370,6 +382,7 @@ public class Server {
                 stacktrace = stacktrace + stackLine;
             }
             Log.i(Server.class.getName(), "IOException while writing into connection: " + e.getMessage() + "\tStackTrace: " + stacktrace);
+            Log.i("Server", "IOEcxeption while writing into connection", e);
         }
         try {
             int responseCode = connection.getResponseCode();

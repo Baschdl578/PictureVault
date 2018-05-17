@@ -14,6 +14,7 @@ import android.net.Uri;
 import android.net.wifi.WifiManager;
 import android.provider.MediaStore;
 import android.support.v4.app.NotificationCompat;
+import android.util.Log;
 
 import org.baschdl.picturevault.R;
 import org.baschdl.picturevault.Server;
@@ -23,6 +24,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.UnknownHostException;
+import java.nio.file.Path;
 import java.util.Calendar;
 import java.util.Locale;
 import java.util.regex.Matcher;
@@ -646,7 +648,16 @@ public class MediaSync {
                         MediaStore.Images.ImageColumns.DATE_ADDED
                 ));
 
-                String[] res = resolution.split("x");
+                String[] res = new String[]{"0", "0"};
+                if (resolution != null) {
+                    res = resolution.split("x");
+                } else {
+                    String localPath = "unknown";
+                    if (path != null) {
+                        localPath = path;
+                    }
+                    Log.i(LOGTAG, "Resolution not specified for item: " + localPath);
+                }
 
                 outId = upload(context, path, bucket, date_taken, date_added, modified, longitude, latitude, Long.parseLong(res[0]), Long.parseLong(res[1]), duration, size, totalSize, startSize, totalItems, currentItem, cancelIntent);
 
@@ -813,7 +824,12 @@ public class MediaSync {
         if (latitudeArg != null) latitude = latitudeArg;
         if (longitudeArg != null) longitude = longitudeArg;
 
-        return Server.uploadFile(context, f, bucket, created, modified, latitude, longitude, h_res, v_res, duration, size, totalSize, startSize, totalItems, currentItem, cancelIntent);
+        Long id = Server.uploadFile(context, f, bucket, created, modified, latitude, longitude, h_res, v_res, duration, size, totalSize, startSize, totalItems, currentItem, cancelIntent);
+        File raw = new File(f.getAbsolutePath().replaceFirst("[.][^.]+$", ".dng"));
+        if (raw.exists()) {
+            Server.uploadFile(context, raw, bucket, created, modified, latitude, longitude, h_res, v_res, duration, size, totalSize, startSize, totalItems, currentItem, cancelIntent, false);
+        }
+        return id;
     }
 
     private synchronized void exit(Context context) {
