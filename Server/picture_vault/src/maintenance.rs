@@ -1,83 +1,231 @@
-use tlq;
-use num_cpus;
 use mysql as sql;
-use quick_xml::reader::Reader;
+use num_cpus;
 use quick_xml::events::Event;
+use quick_xml::reader::Reader;
 use reqwest;
+use tlq;
 
 use std::io::Read;
+use std::process::exit;
 use std::sync::Mutex;
-use std::time as stdtime;
 use std::thread;
+use std::time as stdtime;
 
 use common;
 use database;
 
 struct ProdCons {
-    tx: tlq::Sender<i64>,
-    rx: tlq::Receiver<i64>,
+    tx: tlq::Sender<u64>,
+    rx: tlq::Receiver<u64>,
 }
 
 lazy_static! {
-    static ref PROD_CONS : Mutex<ProdCons> = {
-        let (a, b) = tlq::channel::<i64>(10240);
-        let out = ProdCons {
-            tx: a,
-            rx: b,
-        };
+    static ref PROD_CONS: Mutex<ProdCons> = {
+        let (a, b) = tlq::channel::<u64>(10240);
+        let out = ProdCons { tx: a, rx: b };
         Mutex::new(out)
     };
-    static ref LAST_GEOCODE : Mutex<u64> = Mutex::new(0);
+    static ref LAST_GEOCODE: Mutex<u64> = Mutex::new(0);
 }
 
-pub fn init() {
+pub fn init() -> Result<u8, i8> {
     let cpus = num_cpus::get();
     for _ in 0..cpus {
-        let rx = PROD_CONS.lock().unwrap().rx.clone();
+        let rx = match PROD_CONS.lock() {
+            Ok(p) => p.rx.clone(),
+            Err(e) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &format!("Could not lock channel: {}", e),
+                );
+                exit(5);
+            }
+        };
         thread::spawn(move || loop {
-            let id = rx.recv().unwrap();
-            make_thumbnail(id);
-            do_geocode(id);
+            let id = match rx.recv() {
+                Ok(i) => i,
+                Err(_) => {
+                    common::log_error(
+                        &"maintenance.rs",
+                        &"init",
+                        line!(),
+                        &"Could not get id from channel",
+                    );
+                    continue;
+                }
+            };
+            match make_thumbnail(id) {
+                Ok(_) => {
+                    //nothing
+                }
+                Err(_) => {
+                    continue;
+                }
+            };
+            match do_geocode(id) {
+                Ok(_) => {
+                    //nothing
+                }
+                Err(_) => {
+                    continue;
+                }
+            };
         });
     }
 
+    let mut uneven = true;
     thread::spawn(move || loop {
-        let pool = database::get_db();
-        let query = database::build_query("SELECT id FROM §§.Media WHERE doneCoding = ?");
-        let mut stmt = pool.prepare(query).unwrap();
-        let result = stmt.execute((false,)).unwrap();
+        common::log_info(&"maintenance.rs", &"init", line!(), &"Running maintenance");
+        let start = common::current_time_millis();
+
+        if uneven {
+            make_all_thumbnails();
+            uneven = false;
+        } else {
+            uneven = true;
+        }
+
+        let pool = match database::get_db() {
+            Ok(db) => db,
+            Err(_) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &"Could not get database",
+                );
+                continue;
+            }
+        };
+        let query = match database::build_query("SELECT id FROM §§.Media WHERE doneCoding = ?") {
+            Ok(q) => q,
+            Err(_) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &"Could not build query",
+                );
+                continue;
+            }
+        };
+        let mut stmt = match pool.prepare(query) {
+            Ok(s) => s,
+            Err(e) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &format!("Could not prepare statement: {}", e),
+                );
+                continue;
+            }
+        };
+        let result = match stmt.execute((false,)) {
+            Ok(s) => s,
+            Err(e) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &format!("Could not execute statement: {}", e),
+                );
+                continue;
+            }
+        };
         for wrapped_row in result {
             let row = match wrapped_row {
                 Err(_) => {
-                    common::log(&"maintenance.rs", &"init", &"Error unwraping row");
+                    common::log_error(&"maintenance.rs", &"init", line!(), &"Error unwraping row");
                     continue;
                 }
                 Ok(row) => row,
             };
-            let (id,) = match sql::from_row_opt::<(i64,)>(row) {
+            let (id,) = match sql::from_row_opt::<(u64,)>(row) {
                 Ok(e) => e,
                 Err(_) => {
                     continue;
                 }
             };
-            add_id(id);
+            match make_thumbnail(id) {
+                Ok(_) => {
+                    //nothing
+                }
+                Err(_) => {
+                    continue;
+                }
+            };
+            match do_geocode(id) {
+                Ok(_) => {
+                    //nothing
+                }
+                Err(_) => {
+                    continue;
+                }
+            };
         }
-        let pool = database::get_db();
-        let query = database::build_query(
+        let pool = match database::get_db() {
+            Ok(p) => p,
+            Err(_) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &"Could not get database",
+                );
+                continue;
+            }
+        };
+        let query = match database::build_query(
             "SELECT id FROM §§.Media WHERE last_request < ? AND duration >= 0",
-        );
-        let mut stmt = pool.prepare(query).unwrap();
+        ) {
+            Ok(q) => q,
+            Err(_) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &"Could not build database",
+                );
+                continue;
+            }
+        };
+        let mut stmt = match pool.prepare(query) {
+            Ok(s) => s,
+            Err(e) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &format!("Could not prepare statement: {}", e),
+                );
+                continue;
+            }
+        };
         let time = common::current_time_millis() - (24 * 3600 * 1000);
-        let result = stmt.execute((time,)).unwrap();
+        let result = match stmt.execute((time,)) {
+            Ok(s) => s,
+            Err(e) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &format!("Could not execute statement: {}", e),
+                );
+                continue;
+            }
+        };
         for wrapped_row in result {
             let row = match wrapped_row {
                 Err(_) => {
-                    common::log(&"maintenance.rs", &"init", &"Error unwraping row");
+                    common::log_error(&"maintenance.rs", &"init", line!(), &"Error unwraping row");
                     continue;
                 }
                 Ok(row) => row,
             };
-            let (id,) = match sql::from_row_opt::<(i64,)>(row) {
+            let (id,) = match sql::from_row_opt::<(u64,)>(row) {
                 Ok(e) => e,
                 Err(_) => {
                     continue;
@@ -86,41 +234,138 @@ pub fn init() {
             let media = match database::get_mediainfo_by_id(id) {
                 Ok(v) => v,
                 Err(_) => {
-                    return;
+                    continue;;
                 }
             };
             media.cleanup();
         }
 
+        common::log_info(
+            &"maintenance.rs",
+            &"init",
+            line!(),
+            &format!(
+                "Maintenance took: {}s",
+                (common::current_time_millis() - start) / 1000,
+            ),
+        );
+
         thread::sleep(stdtime::Duration::from_secs(12 * 3600));
     });
+    Ok(0)
 }
 
-pub fn add_id(id: i64) {
-    PROD_CONS.lock().unwrap().tx.clone().send(id).unwrap();
+pub fn add_id(id: u64) {
+    match PROD_CONS.lock() {
+        Ok(p) => {
+            match p.tx.clone().send(id) {
+                Ok(_) => {
+                    //nothing
+                }
+                Err(e) => {
+                    common::log_error(
+                        &"maintenance.rs",
+                        &"add_id",
+                        line!(),
+                        &format!("Could not add id: {}", e),
+                    );
+                }
+            }
+        }
+        Err(e) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"add_id",
+                line!(),
+                &format!("Could not lock channel: {}", e),
+            );
+        }
+    }
 }
 
-fn make_thumbnail(id: i64) {
+fn make_thumbnail(id: u64) -> Result<u8, i8> {
     let media = match database::get_mediainfo_by_id(id) {
         Ok(v) => v,
         Err(_) => {
-            return;
+            common::log_error(
+                &"maintenance.rs",
+                &"make_thumbnail",
+                line!(),
+                &"Could not get mediainfo",
+            );
+            return Err(-2);
         }
     };
-    let _ = media.get_thumbnail(false);
+    match media.get_thumbnail(false) {
+        Ok(_) => {
+            return Ok(0);
+        }
+        Err(_) => {
+            return Err(-1);
+        }
+    }
 }
 
-fn do_geocode(id: i64) {
-    let pool = database::get_db();
+fn do_geocode(id: u64) -> Result<u8, i8> {
+    let pool = match database::get_db() {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"do_geocode",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
     let mut query =
-        database::build_query("SELECT latitude, longitude FROM §§.Media WHERE id = ?;");
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((id,)).unwrap();
+        match database::build_query("SELECT latitude, longitude FROM §§.Media WHERE id = ?;") {
+            Ok(q) => q,
+            Err(_) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"do_geocode",
+                    line!(),
+                    &"Could not build query",
+                );
+                return Err(-1);
+            }
+        };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"do_gocode",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((id,)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"do_geocode",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for wrapped_row in result {
         let row = match wrapped_row {
             Err(_) => {
-                common::log(&"maintenance.rs", &"do_geocode", &"Error unwraping row");
+                common::log_error(
+                    &"maintenance.rs",
+                    &"do_geocode",
+                    line!(),
+                    &"Error unwraping row",
+                );
                 continue;
             }
             Ok(row) => row,
@@ -143,20 +388,21 @@ fn do_geocode(id: i64) {
         url.push_str(&common::get_locale());
 
         let mut response = String::new();
-        {
-            let mut last_time = LAST_GEOCODE.lock().unwrap();
-            let now = common::current_time_millis();
-            let wait_time: u64 = 5 * 1000;
+        wait_for_geocode();
 
-            if *last_time + wait_time > now {
-                thread::sleep(stdtime::Duration::from_millis(*last_time + wait_time - now))
+        let mut resp = match reqwest::get(&url) {
+            Ok(r) => r,
+            Err(e) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"do_geocode",
+                    line!(),
+                    &format!("Could not fetch geocoding data: {}", e),
+                );
+                return Err(-7);
             }
-
-            let mut resp = reqwest::get(&url).unwrap();
-            let _ = resp.read_to_string(&mut response);
-
-            *last_time = common::current_time_millis();
-        }
+        };
+        let _ = resp.read_to_string(&mut response);
 
         let mut reader = Reader::from_str(&response);
         reader.trim_text(true);
@@ -198,13 +444,70 @@ fn do_geocode(id: i64) {
                 },
                 Ok(Event::Text(e)) => {
                     if found {
-                        let pool = database::get_db();
-                        let query = database::build_query(
+                        let pool = match database::get_db() {
+                            Ok(p) => p,
+                            Err(_) => {
+                                common::log_error(
+                                    &"maintenance.rs",
+                                    &"do_geocode",
+                                    line!(),
+                                    &"Could not get database",
+                                );
+                                return Err(-1);
+                            }
+                        };
+                        let query = match database::build_query(
                             "INSERT IGNORE INTO §§.Places (picture, place) VALUES (?, ?);",
-                        );
-                        let mut stmt = pool.prepare(query).unwrap();
-                        let _ = stmt.execute((id, e.unescape_and_decode(&reader).unwrap()))
-                            .unwrap();
+                        ) {
+                            Ok(q) => q,
+                            Err(_) => {
+                                common::log_error(
+                                    &"maintenance.rs",
+                                    &"do_geocode",
+                                    line!(),
+                                    &"Could not build query",
+                                );
+                                return Err(-1);
+                            }
+                        };
+                        let mut stmt = match pool.prepare(query) {
+                            Ok(s) => s,
+                            Err(e) => {
+                                common::log_error(
+                                    &"maintenance.rs",
+                                    &"do_geocode",
+                                    line!(),
+                                    &format!("Could not prepare statement: {}", e),
+                                );
+                                continue;
+                            }
+                        };
+                        let place = match e.unescape_and_decode(&reader) {
+                            Ok(p) => p,
+                            Err(e) => {
+                                common::log_error(
+                                    &"maintenance.rs",
+                                    &"do_geocode",
+                                    line!(),
+                                    &format!("Could not extract place: {}", e),
+                                );
+                                return Err(-7);
+                            }
+                        };
+                        match stmt.execute((id, place)) {
+                            Ok(_) => {
+                                //nothing
+                            }
+                            Err(e) => {
+                                common::log_error(
+                                    &"maintenance.rs",
+                                    &"do_geocode",
+                                    line!(),
+                                    &format!("Could not execute statement: {}", e),
+                                );
+                                return Err(-4);
+                            }
+                        };
                         found = false;
                     }
                 }
@@ -215,8 +518,145 @@ fn do_geocode(id: i64) {
             // if we don't keep a borrow elsewhere, we can clear the buffer to keep memory usage low
             buf.clear();
         }
-        query = database::build_query("UPDATE §§.Media SET doneCoding = ? WHERE id = ?;");
-        let mut stmt = pool.prepare(query).unwrap();
-        let _ = stmt.execute((true, id)).unwrap();
+        query = match database::build_query("UPDATE §§.Media SET doneCoding = ? WHERE id = ?;") {
+            Ok(q) => q,
+            Err(_) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"do_geocode",
+                    line!(),
+                    &"Could not build query",
+                );
+                return Err(-1);
+            }
+        };
+        let mut stmt = match pool.prepare(query) {
+            Ok(s) => s,
+            Err(e) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"do_geocode",
+                    line!(),
+                    &format!("Could not prepare statement: {}", e),
+                );
+                continue;
+            }
+        };
+        match stmt.execute((true, id)) {
+            Ok(_) => {
+                //nothing
+            }
+            Err(e) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"init",
+                    line!(),
+                    &format!("Could not execute statement: {}", e),
+                );
+                return Err(-4);
+            }
+        };
+    }
+    Ok(0)
+}
+fn wait_for_geocode() {
+    let mut last_time = match LAST_GEOCODE.lock() {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"wait_for_geocode",
+                line!(),
+                &format!("Could not lock last_geocode: {}", e),
+            );
+            thread::sleep(stdtime::Duration::from_millis(5000));
+            return;
+        }
+    };
+    let now = common::current_time_millis();
+    let wait_time: u64 = 5 * 1000;
+
+    if *last_time + wait_time > now {
+        thread::sleep(stdtime::Duration::from_millis(*last_time + wait_time - now))
+    }
+    *last_time = common::current_time_millis() + 2000; //assume doing geocode takes 2 secs
+}
+
+fn make_all_thumbnails() {
+    let pool = match database::get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_all_thumbnails",
+                line!(),
+                &"Could not get database",
+            );
+            return;
+        }
+    };
+    let query = match database::build_query("SELECT id FROM §§.Media") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_all_thumbnails",
+                line!(),
+                &"Could not build query",
+            );
+            return;
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_all_thumbnails",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return;
+        }
+    };
+    let result = match stmt.execute(()) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_all_thumbnails",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return;
+        }
+    };
+    for wrapped_row in result {
+        let row = match wrapped_row {
+            Err(_) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"make_all_thumbnails",
+                    line!(),
+                    &"Error unwraping row",
+                );
+                continue;
+            }
+            Ok(row) => row,
+        };
+        let (id,) = match sql::from_row_opt::<(u64,)>(row) {
+            Ok(e) => e,
+            Err(_) => {
+                continue;
+            }
+        };
+        match make_thumbnail(id) {
+            Ok(_) => {
+                //nothing
+            }
+            Err(_) => {
+                //continue;
+            }
+        };
     }
 }

@@ -1,43 +1,114 @@
-use mysql as sql;
 use common;
 use media::Media;
+use mysql as sql;
 
-use std::collections::LinkedList;
-use std::fs::File;
 use rand::{thread_rng, Rng};
+use std::collections::LinkedList;
+use std::process::exit;
 use std::sync::Mutex;
-use std::thread;
 
 lazy_static! {
-    static ref DB : Mutex<sql::Pool> = Mutex::new(make_db());
+    static ref DB: Mutex<sql::Pool> = {
+        let pool = match make_db() {
+            Ok(p) => p,
+            Err(_) => {
+                common::log_error(
+                    &"database.rs",
+                    &"lazy_static",
+                    line!(),
+                    &"Could not make new database",
+                );
+                exit(3);
+            }
+        };
+        Mutex::new(pool)
+    };
 }
 
-pub fn get_db() -> sql::Pool {
-    return DB.lock().unwrap().clone();
+pub fn get_db() -> Result<sql::Pool, i8> {
+    return match DB.lock() {
+        Ok(db) => Ok(db.clone()),
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_db",
+                line!(),
+                &"Could not lock database",
+            );
+            Err(-1)
+        }
+    };
 }
 
-fn make_db() -> sql::Pool {
-    let db_user: String = common::get_string("db_user");
-    let db_pass: String = common::get_string("db_pass");
-    let db_addr: String = common::get_string("db_address");
-    let db_port: i32 = common::get_int("db_port");
+fn make_db() -> Result<sql::Pool, i8> {
+    let db_user: String = match common::get_string("db_user") {
+        Ok(s) => s,
+        Err(_) => {
+            common::log_error(&"database", &"make_db", line!(), "Could not get db user");
+            return Err(-5);
+        }
+    };
+    let db_pass: String = match common::get_string("db_pass") {
+        Ok(s) => s,
+        Err(_) => {
+            common::log_error(&"database", &"make_db", line!(), "Could not get db pass");
+            return Err(-5);
+        }
+    };
+    let db_addr: String = match common::get_string("db_address") {
+        Ok(s) => s,
+        Err(_) => {
+            common::log_error(&"database", &"make_db", line!(), "Could not get db address");
+            return Err(-5);
+        }
+    };
+    let db_port: i32 = match common::get_int("db_port") {
+        Ok(s) => s,
+        Err(_) => {
+            common::log_error(&"database", &"make_db", line!(), "Could not get db port");
+            return Err(-5);
+        }
+    };
 
     let connection: String = format!("mysql://{}:{}@{}:{}", db_user, db_pass, db_addr, db_port);
 
-    return sql::Pool::new(connection).unwrap();
+    return match sql::Pool::new(connection) {
+        Ok(e) => Ok(e),
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                "make_db",
+                line!(),
+                &format!("Error making database: {}", e),
+            );
+            Err(-1)
+        }
+    };
 }
 
-pub fn get_db_name() -> String {
+pub fn get_db_name() -> Result<String, i8> {
     return common::get_string("db_name");
 }
 
-pub fn build_query(query: &str) -> String {
-    return str::replace(query, "§§", &get_db_name()).to_string();
+pub fn build_query(query: &str) -> Result<String, i8> {
+    let name = match get_db_name() {
+        Ok(s) => s,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"match build_query",
+                line!(),
+                "Could not get database name",
+            );
+            return Err(-1);
+        }
+    };
+    return Ok(str::replace(query, "§§", &name).to_string());
 }
 
 fn join_lists(
-    list: &mut LinkedList<(i64, String, u64, (i64, i64, i64, i64))>,
-    list2: &LinkedList<(i64, String, u64, (i64, i64, i64, i64))>,
+    list: &mut LinkedList<(u64, String, u64, (u64, u64, u64, u64))>,
+    list2: &LinkedList<(u64, String, u64, (u64, u64, u64, u64))>,
     name: String,
 ) {
     for &(id, ref name2, count, (sa1, sa2, sa3, sa4)) in list2.iter() {
@@ -47,30 +118,126 @@ fn join_lists(
     }
 }
 
-pub fn init() {
-    let pool = get_db();
-
-    let mut stmt = pool.prepare(build_query("CREATE DATABASE IF NOT EXISTS §§;"))
-        .unwrap();
-    let _ = stmt.execute(()).unwrap();
-
-    let mut stmt = pool.prepare(build_query(
+pub fn init() -> Result<i8, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(&"database.rs", &"init", line!(), &"Could not get database");
+            return Err(-1);
+        }
+    };
+    let mut query = match build_query("CREATE DATABASE IF NOT EXISTS §§;") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(&"database.rs", &"init", line!(), &"Could not build query");
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute(()) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-3);
+        }
+    };
+    query = match build_query(
         "CREATE TABLE IF NOT EXISTS §§.Library (id INT NOT NULL AUTO_INCREMENT,
         name TEXT NOT NULL, PRIMARY KEY (id))
         ENGINE=INNODB CHARACTER SET utf8 COLLATE utf8_unicode_ci;",
-    )).unwrap();
-    let _ = stmt.execute(()).unwrap();
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(&"database.rs", &"init", line!(), &"Could not build query");
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute(()) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-3);
+        }
+    };
 
-    stmt = pool.prepare(build_query(
+    query = match build_query(
         "CREATE TABLE IF NOT EXISTS §§.Users
         (id INT NOT NULL AUTO_INCREMENT, path TEXT NOT NULL, lastsync BIGINT,
         email TEXT NOT NULL, pass TEXT NOT NULL, os_user TEXT NOT NULL,
         os_group TEXT NOT NULL, group_visible TINYINT NOT NULL DEFAULT '0',
         PRIMARY KEY (id)) ENGINE=INNODB CHARACTER SET utf8 COLLATE utf8_unicode_ci;",
-    )).unwrap();
-    let _ = stmt.execute(()).unwrap();
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(&"database.rs", &"init", line!(), &"Could not build query");
+            return Err(-3);
+        }
+    };
+    stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute(()) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-3);
+        }
+    };
 
-    stmt = pool.prepare(build_query(
+    query = match build_query(
         "CREATE TABLE IF NOT EXISTS §§.Media
         (id INT NOT NULL AUTO_INCREMENT, path VARCHAR(255) NOT NULL,
         filename VARCHAR(255) NOT NULL, longitude DOUBLE, latitude DOUBLE,
@@ -81,80 +248,253 @@ pub fn init() {
         PRIMARY KEY (id), FOREIGN KEY (library) REFERENCES Library(id),
         FOREIGN KEY (user) REFERENCES Users(id), UNIQUE (path, filename))
         ENGINE=INNODB CHARACTER SET utf8 COLLATE utf8_unicode_ci;",
-    )).unwrap();
-    let _ = stmt.execute(()).unwrap();
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(&"database.rs", &"init", line!(), &"Could not build query");
+            return Err(-3);
+        }
+    };
+    stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute(()) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-3);
+        }
+    };
 
-    stmt = pool.prepare(build_query(
+    query = match build_query(
         "CREATE TABLE IF NOT EXISTS §§.Places (id INT NOT NULL AUTO_INCREMENT,
         picture INT NOT NULL, place VARCHAR(255) NOT NULL, PRIMARY KEY (id),
         UNIQUE (picture, place), FOREIGN KEY (picture) REFERENCES Media(id))
         ENGINE=INNODB CHARACTER SET utf8 COLLATE utf8_unicode_ci;",
-    )).unwrap();
-    let _ = stmt.execute(()).unwrap();
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(&"database.rs", &"init", line!(), &"Could not build query");
+            return Err(-3);
+        }
+    };
+    stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute(()) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"init",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-3);
+        }
+    };
+    Ok(0)
 }
 
-pub fn get_user_id_and_verify(user: &str, hash: &str) -> i64 {
-    let pool = get_db();
+pub fn get_user_id_and_verify(user: &str, hash: &str) -> Result<u64, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_user_id_and_verify",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
 
-    let mut stmt = pool.prepare(build_query(
-        &"SELECT id, pass FROM §§.Users WHERE email = ?;",
-    )).unwrap();
-    let result = stmt.execute((&user,)).unwrap();
+    let query = match build_query(&"SELECT id, pass FROM §§.Users WHERE email = ?;") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_user_id_and_verify",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_user_id_and_verify",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((&user,)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_user_id_and_verify",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for row in result {
         let naked_row = match row {
             Err(_) => {
-                common::log(
+                common::log_error(
                     &"database.rs",
                     &"get_user_id_and_verify",
+                    line!(),
                     &"Error unwraping row",
                 );
                 continue;
             }
             Ok(row) => row,
         };
-        let (id, pass) = match sql::from_row_opt::<(i64, String)>(naked_row) {
+        let (id, pass) = match sql::from_row_opt::<(u64, String)>(naked_row) {
             Ok(v) => v,
             Err(_) => {
                 continue;
             }
         };
         if str::eq(&pass, hash) {
-            return id;
+            return Ok(id);
         }
     }
-    return -1;
+    return Err(-5);
 }
 
-pub fn get_libs(user: i64) -> LinkedList<(i64, String, u64, (i64, i64, i64, i64))> {
-    let pool = get_db();
-    let query = build_query(
+pub fn get_libs(user: u64) -> Result<LinkedList<(u64, String, u64, (u64, u64, u64, u64))>, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_libs",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query(
         "SELECT id, name FROM §§.Library WHERE id IN
         (SELECT DISTINCT library FROM §§.Media WHERE user = ?);",
-    );
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((user,)).unwrap();
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_libs",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_libs",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((user,)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_libs",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
-    let mut list: LinkedList<(i64, String, u64, (i64, i64, i64, i64))> = LinkedList::new();
-    let mut list2: LinkedList<(i64, String, u64, (i64, i64, i64, i64))> = LinkedList::new();
+    let mut list: LinkedList<(u64, String, u64, (u64, u64, u64, u64))> = LinkedList::new();
+    let mut list2: LinkedList<(u64, String, u64, (u64, u64, u64, u64))> = LinkedList::new();
 
     for row in result {
         let naked_row = match row {
             Err(_) => {
-                common::log(&"database.rs", &"get_libs", &"Error unwraping row");
+                common::log_error(&"database.rs", &"get_libs", line!(), &"Error unwraping row");
                 continue;
             }
             Ok(row) => row,
         };
-        let (id, name) = match sql::from_row_opt::<(i64, String)>(naked_row) {
+        let (id, name) = match sql::from_row_opt::<(u64, String)>(naked_row) {
             Ok(v) => v,
             Err(_) => {
                 continue;
             }
         };
-        let samples = get_samples(id, user);
+        let samples = match get_samples(id, user) {
+            Ok(s) => s,
+            Err(_) => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_libs",
+                    line!(),
+                    &"Could not get samples",
+                );
+                return Err(-5);
+            }
+        };
 
-        let count = get_media_count(id, user);
+        let count = match get_media_count(id, user) {
+            Ok(s) => s,
+            Err(_) => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_libs",
+                    line!(),
+                    &"Could not get media count",
+                );
+                return Err(-5);
+            }
+        };
 
         if name == "Camera" || name == "Kamera" || name == "WhatsApp Images" || name == "Instagram"
             || name == "Google Fotos" || name == "OneDrive" || name == "Messenger"
@@ -174,21 +514,60 @@ pub fn get_libs(user: i64) -> LinkedList<(i64, String, u64, (i64, i64, i64, i64)
     join_lists(&mut list, &list2, "Camera".to_string());
     join_lists(&mut list, &list2, "Kamera".to_string());
 
-    return list;
+    return Ok(list);
 }
 
-fn get_media_count(id: i64, user: i64) -> u64 {
-    let pool = get_db();
-    let query = build_query(
+fn get_media_count(id: u64, user: u64) -> Result<u64, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_media_count",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query(
         "SELECT COUNT(id) AS `total` FROM (SELECT id FROM §§.Media WHERE library = ? AND user = ?) AS `other` ",
-    );
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((id, user)).unwrap();
+    ) {
+            Ok(q)   => q,
+            Err(_)  => {
+                common::log_error(&"database.rs", &"get_media_count", line!(), &"Could not build query");
+                return Err(-3);
+            }
+        };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_media_count",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((id, user)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_media_count",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for row in result {
         let naked_row = match row {
             Err(_) => {
-                common::log(&"database.rs", &"get_libs", &"Error unwraping row");
+                common::log_error(&"database.rs", &"get_libs", line!(), &"Error unwraping row");
                 continue;
             }
             Ok(row) => row,
@@ -199,21 +578,71 @@ fn get_media_count(id: i64, user: i64) -> u64 {
                 continue;
             }
         };
-        return count;
+        return Ok(count);
     }
-    return 0;
+    return Err(-5);
 }
 
-pub fn ownership_info(user: i64) -> (String, String, bool) {
-    let pool = get_db();
-    let query = build_query("SELECT os_user, os_group, group_visible FROM §§.Users WHERE id = ?");
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((user,)).unwrap();
+pub fn ownership_info(user: u64) -> Result<(String, String, bool), i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"ownership_info",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query =
+        match build_query("SELECT os_user, os_group, group_visible FROM §§.Users WHERE id = ?") {
+            Ok(q) => q,
+            Err(_) => {
+                common::log_error(
+                    &"database.rs",
+                    &"ownership_info",
+                    line!(),
+                    &"Could not build query",
+                );
+                return Err(-3);
+            }
+        };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"ownership_info",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((user,)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"ownership_info",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for row in result {
         let naked_row = match row {
             Err(_) => {
-                common::log(&"database.rs", &"get_pics_by_lib", &"Error unwraping row");
+                common::log_error(
+                    &"database.rs",
+                    &"get_pics_by_lib",
+                    line!(),
+                    &"Error unwraping row",
+                );
                 continue;
             }
             Ok(row) => row,
@@ -225,55 +654,110 @@ pub fn ownership_info(user: i64) -> (String, String, bool) {
             }
         };
 
-        return (user, group, visible == 1);
+        return Ok((user, group, visible == 1));
     }
-    return (String::from("root"), String::from("root"), false);
+    return Err(-5);
 }
 
-fn get_samples(libid: i64, user: i64) -> (i64, i64, i64, i64) {
-    let pool = get_db();
-    let query = build_query("SELECT id FROM §§.Media WHERE user = ? AND library = ?");
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((user, libid));
+fn get_samples(libid: u64, user: u64) -> Result<(u64, u64, u64, u64), i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_samples",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query("SELECT id FROM §§.Media WHERE user = ? AND library = ?") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_samples",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_samples",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((user, libid)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_samples",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
-    let list: Vec<i64> = result
-        .map(|result| {
-            // In this closure we will map `QueryResult` to `Vec<Payment>`
-            // `QueryResult` is iterator over `MyResult<row, err>` so first call to `map`
-            // will map each `MyResult` to contained `row` (no proper error handling)
-            // and second call to `map` will map each `row` to `Payment`
-            result
-                .map(|x| x.unwrap())
-                .map(|row| sql::from_row::<i64>(row))
-                .collect() // Collect payments so now `QueryResult` is mapped to `Vec<Payment>`
-        })
-        .unwrap(); // Unwrap `Vec<Payment>`
+    let mut list: Vec<u64> = Vec::new();
+    for row in result {
+        let naked_row = match row {
+            Err(_) => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_samples",
+                    line!(),
+                    &"Error unwraping row",
+                );
+                continue;
+            }
+            Ok(row) => row,
+        };
+        let id = match sql::from_row_opt::<u64>(naked_row) {
+            Ok(v) => v,
+            Err(_) => {
+                continue;
+            }
+        };
+
+        list.push(id);
+    }
 
     let count = list.len();
     if count == 0 {
-        return (-1, -1, -1, -1);
+        return Err(-5);
     }
     if count == 1 {
         let id = list[0];
-        return (id, -1, -1, -1);
+        return Ok((id, 0, 0, 0));
     }
     if count == 2 {
         let id = list[0];
         let id2 = list[1];
-        return (id, id2, -1, -1);
+        return Ok((id, id2, 0, 0));
     }
     if count == 3 {
         let id = list[0];
         let id2 = list[1];
         let id3 = list[2];
-        return (id, id2, id3, -1);
+        return Ok((id, id2, id3, 0));
     }
     if count == 4 {
         let id = list[0];
         let id2 = list[1];
         let id3 = list[2];
         let id4 = list[3];
-        return (id, id2, id3, id4);
+        return Ok((id, id2, id3, id4));
     }
     if count == 5 {
         let id = list[0];
@@ -285,7 +769,7 @@ fn get_samples(libid: i64, user: i64) -> (i64, i64, i64, i64) {
         } else {
             id4 = list[4];
         }
-        return (id, id2, id3, id4);
+        return Ok((id, id2, id3, id4));
     }
     if count == 6 {
         let mut rng = thread_rng();
@@ -294,7 +778,7 @@ fn get_samples(libid: i64, user: i64) -> (i64, i64, i64, i64) {
         let id2 = list[1 + offset];
         let id3 = list[2 + offset];
         let id4 = list[3 + offset];
-        return (id, id2, id3, id4);
+        return Ok((id, id2, id3, id4));
     }
     if count == 7 {
         let mut rng = thread_rng();
@@ -303,7 +787,7 @@ fn get_samples(libid: i64, user: i64) -> (i64, i64, i64, i64) {
         let id2 = list[1 + offset];
         let id3 = list[2 + offset];
         let id4 = list[3 + offset];
-        return (id, id2, id3, id4);
+        return Ok((id, id2, id3, id4));
     }
 
     let mut rng = thread_rng();
@@ -316,31 +800,75 @@ fn get_samples(libid: i64, user: i64) -> (i64, i64, i64, i64) {
     let id2 = list[num2];
     let id3 = list[num3];
     let id4 = list[num4];
-    return (id1, id2, id3, id4);
+    return Ok((id1, id2, id3, id4));
 }
 
-pub fn get_pics_by_lib(libid: i64, user: i64) -> LinkedList<(i64, String, i64, u64)> {
-    let pool = get_db();
-    let query = build_query(
+pub fn get_pics_by_lib(libid: u64, user: u64) -> Result<LinkedList<(u64, String, i64, u64)>, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_pics_by_lib",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query(
         "SELECT id, filename, duration, size FROM §§.Media WHERE user = ? AND library = ? ORDER BY
         (CASE WHEN created < modified THEN created ELSE modified END) DESC,
         filename DESC",
-    );
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((user, libid)).unwrap();
+    ) {
+            Ok(q)   => q,
+            Err(_)  => {
+                common::log_error(&"database.rs", &"get_pics_by_lib", line!(), &"Could not build query");
+                return Err(-3);
+            }
+        };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_pics_by_lib",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((user, libid)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_pics_by_lib",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
-    let mut list: LinkedList<(i64, String, i64, u64)> = LinkedList::new();
+    let mut list: LinkedList<(u64, String, i64, u64)> = LinkedList::new();
 
     for row in result {
         let naked_row = match row {
             Err(_) => {
-                common::log(&"database.rs", &"get_pics_by_lib", &"Error unwraping row");
+                common::log_error(
+                    &"database.rs",
+                    &"get_pics_by_lib",
+                    line!(),
+                    &"Error unwraping row",
+                );
                 continue;
             }
             Ok(row) => row,
         };
         let (id, name, duration, size) =
-            match sql::from_row_opt::<(i64, String, i64, u64)>(naked_row) {
+            match sql::from_row_opt::<(u64, String, i64, u64)>(naked_row) {
                 Ok(v) => v,
                 Err(_) => {
                     continue;
@@ -349,19 +877,68 @@ pub fn get_pics_by_lib(libid: i64, user: i64) -> LinkedList<(i64, String, i64, u
 
         list.push_back((id, name, duration, size));
     }
-    return list;
+    return Ok(list);
 }
 
-pub fn get_userpath(uid: i64) -> String {
-    let pool = get_db();
-    let query = build_query("SELECT path FROM §§.Users WHERE id = ?;");
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((uid,)).unwrap();
+pub fn get_userpath(uid: u64) -> Result<String, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_userpath",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query("SELECT path FROM §§.Users WHERE id = ?;") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_userpath",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_userpath",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((uid,)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_userpath",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for wrapped_row in result {
         let row = match wrapped_row {
             Err(_) => {
-                common::log(&"database.rs", &"get_userpath", &"Error unwraping row");
+                common::log_error(
+                    &"database.rs",
+                    &"get_userpath",
+                    line!(),
+                    &"Error unwraping row",
+                );
                 continue;
             }
             Ok(row) => row,
@@ -372,16 +949,63 @@ pub fn get_userpath(uid: i64) -> String {
                 continue;
             }
         };
-        return out;
+        return Ok(out);
     }
-    return String::new();
+    return Err(-5);
 }
 
-fn add_library(bucket: &String) {
-    let pool = get_db();
-    let query = build_query("INSERT IGNORE INTO §§.Library (name) VALUES (?);");
-    let mut stmt = pool.prepare(query).unwrap();
-    let _ = stmt.execute((bucket,)).unwrap();
+fn add_library(bucket: &String) -> Result<u8, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"add_library",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query("INSERT IGNORE INTO §§.Library (name) VALUES (?);") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"add_library",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"add_library",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute((bucket,)) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"add_library",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
+    return Ok(0);
 }
 
 pub fn add_media(
@@ -395,38 +1019,82 @@ pub fn add_media(
     h_res: u64,
     v_res: u64,
     duration: i64,
-    uid: i64,
-) -> i64 {
-    let pool = get_db();
-    let query = build_query(
+    size: u64,
+    uid: u64,
+) -> Result<u64, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"add_media",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query(
         "INSERT IGNORE INTO §§.Media (path, filename, created, modified,
         latitude, longitude, horiz_resolution, vert_resolution, library, duration, user, size) VALUES
         (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);",
-    );
-    let mut stmt = pool.prepare(query).unwrap();
+    ) {
+            Ok(q)   => q,
+            Err(_)  => {
+                common::log_error(&"database.rs", &"add_media", line!(), &"Could not build query");
+                return Err(-3);
+            }
+        };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"add_media",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
     let bucket_copy = format!("{}", &bucket);
-    let lib_id = get_lib_id_from_name(bucket);
-    if lib_id <= 0 {
-        add_library(&bucket_copy);
-    }
-    let lib_id = get_lib_id_from_name(bucket_copy);
-    if lib_id <= 0 {
-        return -1;
-    }
+    let lib_id = match get_lib_id_from_name(bucket) {
+        Ok(i) => i,
+        Err(_) => {
+            match add_library(&bucket_copy) {
+                Ok(_) => {
+                    //nothing
+                }
+                Err(_) => {
+                    common::log_error(
+                        &"database.rs",
+                        &"add_media",
+                        line!(),
+                        &"Could not add library",
+                    );
+                    return Err(-5);
+                }
+            }
+            match get_lib_id_from_name(bucket_copy) {
+                Ok(i) => i,
+                Err(_) => {
+                    common::log_error(
+                        &"database.rs",
+                        &"add_media",
+                        line!(),
+                        &"Could not get library id",
+                    );
+                    return Err(-5);
+                }
+            }
+        }
+    };
     let tmp_path = format!("{}", &path);
-    let tmp_file = format!("{}", &filename);
+    let tmp_filename = format!("{}", &filename);
 
-    let mut fullpath: String = String::new();
-    fullpath.push_str(&path);
-    if !fullpath.ends_with("/") {
-        fullpath.push_str("/")
-    }
-    fullpath.push_str(&filename);
-    let size = File::open(fullpath).unwrap().metadata().unwrap().len();
-
-    let _ = stmt.execute((
+    match stmt.execute((
         tmp_path,
-        tmp_file,
+        tmp_filename,
         created,
         modified,
         latitude,
@@ -437,131 +1105,407 @@ pub fn add_media(
         duration,
         uid,
         size,
-    )).unwrap();
+    )) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"add_media",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    }
 
-    let pool = get_db();
-    let query = build_query("SELECT id FROM §§.Media WHERE path = ? AND filename = ?;");
-    let mut stmt = pool.prepare(query).unwrap();
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"add_media",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query("SELECT id FROM §§.Media WHERE path = ? AND filename = ?;") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"add_media",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"add_media",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
 
-    let result = stmt.execute((path, filename)).unwrap();
+    let result = match stmt.execute((path, filename)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"add_media",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
     for wrapped_row in result {
         let row = match wrapped_row {
             Err(_) => {
-                common::log(&"database.rs", &"add_media", &"Error unwraping row");
+                common::log_error(
+                    &"database.rs",
+                    &"add_media",
+                    line!(),
+                    &"Error unwraping row",
+                );
                 continue;
             }
             Ok(row) => row,
         };
-        let id: i64 = match sql::from_row_opt::<i64>(row) {
+        let id: u64 = match sql::from_row_opt::<u64>(row) {
             Ok(v) => v,
             _ => {
                 continue;
             }
         };
-        return id;
+        return Ok(id);
     }
-    return -1;
+    return Err(-5);
 }
 
-fn get_lib_id_from_name(lib_name: String) -> i64 {
-    let pool = get_db();
-    let query = build_query("SELECT id FROM §§.Library WHERE name = ?;");
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((lib_name,)).unwrap();
+fn get_lib_id_from_name(lib_name: String) -> Result<u64, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_lib_id_from_name",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query("SELECT id FROM §§.Library WHERE name = ?;") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_lib_id_from_name",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_lib_id_from_name",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((lib_name,)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_lib_id_from_name",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for wrapped_row in result {
         let row = match wrapped_row {
             Err(_) => {
-                common::log(&"database.rs", &"get", &"Error unwraping row");
+                common::log_error(&"database.rs", &"get", line!(), &"Error unwraping row");
                 continue;
             }
             Ok(row) => row,
         };
-        let id: i64 = match sql::from_row_opt::<i64>(row) {
+        let id: u64 = match sql::from_row_opt::<u64>(row) {
             Ok(v) => v,
             _ => {
                 continue;
             }
         };
-        return id;
+        return Ok(id);
     }
-    return -1;
+    return Err(-5);
 }
 
-pub fn get_mediainfo(user: i64, mediaid: i64) -> Result<Media, i16> {
-    let pool = get_db();
-    let query = build_query("UPDATE §§.Media SET last_request = ? WHERE id = ? AND user = ?;");
-    let mut stmt = pool.prepare(query).unwrap();
-    let _ = stmt.execute((common::current_time_millis(), mediaid, user))
-        .unwrap();
+pub fn get_mediainfo(user: u64, mediaid: u64) -> Result<Media, i16> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query =
+        match build_query("UPDATE §§.Media SET last_request = ? WHERE id = ? AND user = ?;") {
+            Ok(q) => q,
+            Err(_) => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_mediainfo",
+                    line!(),
+                    &"Could not build query",
+                );
+                return Err(-3);
+            }
+        };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute((common::current_time_millis(), mediaid, user)) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
-    let pool = get_db();
-    let query = build_query(
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query(
         "SELECT id, path, filename, longitude, latitude, created, modified,
         horiz_resolution, vert_resolution, duration, last_request FROM §§.Media
         WHERE user = ? AND id = ?",
-    );
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((user, mediaid)).unwrap();
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((user, mediaid)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for wrapped_row in result {
         let mut row = match wrapped_row {
             Err(_) => {
-                common::log(&"database.rs", &"get_media", &"Error unwraping row");
+                common::log_error(
+                    &"database.rs",
+                    &"get_media",
+                    line!(),
+                    &"Error unwraping row",
+                );
                 continue;
             }
             Ok(row) => row,
         };
 
-        let id: i64 = match row.take_opt(0).unwrap() {
-            Ok(v) => v,
-            _ => {
+        let id: u64 = match row.take_opt(0) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(e) => {
+                    common::log_error(
+                        &"database.rs",
+                        &"get_mediainfo",
+                        line!(),
+                        &format!("Could not take from row: {}", e),
+                    );
+                    continue;
+                }
+            },
+            None => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_mediainfo",
+                    line!(),
+                    &"Could not take from row",
+                );
                 continue;
             }
         };
-        let path: String = match row.take_opt(1).unwrap() {
-            Ok(v) => v,
-            _ => {
+        let path: String = match row.take_opt(1) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(e) => {
+                    common::log_error(
+                        &"database.rs",
+                        &"get_mediainfo",
+                        line!(),
+                        &format!("Could not take from row: {}", e),
+                    );
+                    continue;
+                }
+            },
+            None => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_mediainfo",
+                    line!(),
+                    &"Could not take from row",
+                );
                 continue;
             }
         };
-        let filename: String = match row.take_opt(2).unwrap() {
-            Ok(v) => v,
-            _ => {
+        let filename: String = match row.take_opt(2) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(e) => {
+                    common::log_error(
+                        &"database.rs",
+                        &"get_mediainfo",
+                        line!(),
+                        &format!("Could not take from row: {}", e),
+                    );
+                    continue;
+                }
+            },
+            None => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_mediainfo",
+                    line!(),
+                    &"Could not take from row",
+                );
                 continue;
             }
         };
-        let longitude: f64 = match row.take_opt(3).unwrap() {
-            Ok(v) => v,
-            _ => 0.0,
+        let longitude: f64 = match row.take_opt(3) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0.0,
+            },
+            None => 0.0,
         };
-        let latitude: f64 = match row.take_opt(4).unwrap() {
-            Ok(v) => v,
-            _ => 0.0,
+        let latitude: f64 = match row.take_opt(4) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0.0,
+            },
+            None => 0.0,
         };
-        let created: u64 = match row.take_opt(5).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let created: u64 = match row.take_opt(5) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        let modified: u64 = match row.take_opt(6).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let modified: u64 = match row.take_opt(6) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        let h_res: u64 = match row.take_opt(7).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let h_res: u64 = match row.take_opt(7) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        let v_res: u64 = match row.take_opt(8).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let v_res: u64 = match row.take_opt(8) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        let duration: i64 = match row.take_opt(9).unwrap() {
-            Ok(v) => v,
-            _ => -1,
+        let duration: i64 = match row.take_opt(9) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => -1,
+            },
+            None => -1,
         };
-        let last_request: u64 = match row.take_opt(10).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let last_request: u64 = match row.take_opt(10) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
         return match Media::new(
             id,
@@ -583,95 +1527,313 @@ pub fn get_mediainfo(user: i64, mediaid: i64) -> Result<Media, i16> {
     return Err(1);
 }
 
-pub fn remove_by_id(mediaid: i64) {
-    thread::spawn(move || {
-        let pool = get_db();
-        let query = build_query(
-            "DELETE FROM §§.Media
-        WHERE id = ?",
-        );
-        let mut stmt = pool.prepare(query).unwrap();
-        let _ = stmt.execute((mediaid,)).unwrap();
-
-        let query = build_query(
-            "DELETE FROM §§.Places
+pub fn remove_by_id(mediaid: u64) -> Result<u8, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"remove_by_id",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query(
+        "DELETE FROM §§.Places
         WHERE picture = ?",
-        );
-        let mut stmt = pool.prepare(query).unwrap();
-        let _ = stmt.execute((mediaid,)).unwrap();
-    });
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"remove_by_id",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"remove_by_id",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute((mediaid,)) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"remove_by_id",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
+
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"remove_by_id",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+
+    let query = match build_query(
+        "DELETE FROM §§.Media
+        WHERE id = ?",
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"remove_by_id",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"remove_by_id",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute((mediaid,)) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"remove_by_id",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
+    Ok(0)
 }
 
-pub fn get_mediainfo_by_id(mediaid: i64) -> Result<Media, i16> {
-    let pool = get_db();
-    let query = build_query(
+pub fn get_mediainfo_by_id(mediaid: u64) -> Result<Media, i16> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo_by_id",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query(
         "SELECT id, path, filename, longitude, latitude, created, modified,
         horiz_resolution, vert_resolution, duration, last_request FROM §§.Media
         WHERE id = ?",
-    );
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((mediaid,)).unwrap();
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo_by_id",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo_by_id",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((mediaid,)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_mediainfo_by_id",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for wrapped_row in result {
         let mut row = match wrapped_row {
             Err(_) => {
-                common::log(&"database.rs", &"get_media_by_id", &"Error unwraping row");
+                common::log_error(
+                    &"database.rs",
+                    &"get_media_by_id",
+                    line!(),
+                    &"Error unwraping row",
+                );
                 continue;
             }
             Ok(row) => row,
         };
 
-        let id: i64 = match row.take_opt(0).unwrap() {
-            Ok(v) => v,
-            _ => {
+        let id: u64 = match row.take_opt(0) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(e) => {
+                    common::log_error(
+                        &"database.rs",
+                        &"get_mediainfo_by_id",
+                        line!(),
+                        &format!("Could not take from row: {}", e),
+                    );
+                    continue;
+                }
+            },
+            None => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_mediainfo_by_id",
+                    line!(),
+                    &"Could not take from row",
+                );
                 continue;
             }
         };
-        let path: String = match row.take_opt(1).unwrap() {
-            Ok(v) => v,
-            _ => {
+        let path: String = match row.take_opt(1) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(e) => {
+                    common::log_error(
+                        &"database.rs",
+                        &"get_mediainfo_by_id",
+                        line!(),
+                        &format!("Could not take from row: {}", e),
+                    );
+                    continue;
+                }
+            },
+            None => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_mediainfo_by_id",
+                    line!(),
+                    &"Could not take from row",
+                );
                 continue;
             }
         };
-        let filename: String = match row.take_opt(2).unwrap() {
-            Ok(v) => v,
-            _ => {
+        let filename: String = match row.take_opt(2) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(e) => {
+                    common::log_error(
+                        &"database.rs",
+                        &"get_mediainfo_by_id",
+                        line!(),
+                        &format!("Could not take from row: {}", e),
+                    );
+                    continue;
+                }
+            },
+            None => {
+                common::log_error(
+                    &"database.rs",
+                    &"get_mediainfo_by_id",
+                    line!(),
+                    &"Could not take from row",
+                );
                 continue;
             }
         };
-        let longitude: f64 = match row.take_opt(3).unwrap() {
-            Ok(v) => v,
-            _ => 0.0,
+        let longitude: f64 = match row.take_opt(3) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0.0,
+            },
+            None => 0.0,
         };
-        let latitude: f64 = match row.take_opt(4).unwrap() {
-            Ok(v) => v,
-            _ => 0.0,
+        let latitude: f64 = match row.take_opt(4) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0.0,
+            },
+            None => 0.0,
         };
-        let created: u64 = match row.take_opt(5).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let created: u64 = match row.take_opt(5) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        let modified: u64 = match row.take_opt(6).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let modified: u64 = match row.take_opt(6) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        let h_res: u64 = match row.take_opt(7).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let h_res: u64 = match row.take_opt(7) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        let v_res: u64 = match row.take_opt(8).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let v_res: u64 = match row.take_opt(8) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        let duration: i64 = match row.take_opt(9).unwrap() {
-            Ok(v) => v,
-            _ => -1,
+        let duration: i64 = match row.take_opt(9) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => -1,
+            },
+            None => -1,
         };
-        let last_request: u64 = match row.take_opt(10).unwrap() {
-            Ok(v) => v,
-            _ => 0,
+        let last_request: u64 = match row.take_opt(10) {
+            Some(v) => match v {
+                Ok(v) => v,
+                Err(_) => 0,
+            },
+            None => 0,
         };
-        return match Media::new(
+        match Media::new(
             id,
             path,
             filename,
@@ -684,23 +1846,76 @@ pub fn get_mediainfo_by_id(mediaid: i64) -> Result<Media, i16> {
             duration,
             last_request,
         ) {
-            Ok(m) => Ok(m),
-            Err(_) => Err(-2),
+            Ok(m) => {
+                return Ok(m);
+            }
+            Err(_) => {
+                continue;
+            }
         };
     }
     return Err(1);
 }
 
-pub fn get_lastsync(uid: i64) -> u64 {
-    let pool = get_db();
-    let query = build_query("SELECT lastsync FROM §§.Users WHERE id = ?");
-    let mut stmt = pool.prepare(query).unwrap();
-    let result = stmt.execute((uid,)).unwrap();
+pub fn get_lastsync(uid: u64) -> Result<u64, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_lastsync",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query("SELECT lastsync FROM §§.Users WHERE id = ?") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"get_lastsync",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_lastsync",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    let result = match stmt.execute((uid,)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"get_lastsync",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
 
     for wrapped_row in result {
         let row = match wrapped_row {
             Err(_) => {
-                common::log(&"database.rs", &"get_userpath", &"Error unwraping row");
+                common::log_error(
+                    &"database.rs",
+                    &"get_userpath",
+                    line!(),
+                    &"Error unwraping row",
+                );
                 continue;
             }
             Ok(row) => row,
@@ -711,16 +1926,59 @@ pub fn get_lastsync(uid: i64) -> u64 {
                 continue;
             }
         };
-        return value;
+        return Ok(value);
     }
-    return 0;
+    return Err(-5);
 }
 
-pub fn set_lastsync(uid: i64, lastsync: u64) {
-    thread::spawn(move || {
-        let pool = get_db();
-        let query = build_query("UPDATE §§.Users SET lastsync = ? WHERE id = ?");
-        let mut stmt = pool.prepare(query).unwrap();
-        let _ = stmt.execute((lastsync, uid)).unwrap();
-    });
+pub fn set_lastsync(uid: u64, lastsync: u64) -> Result<u8, i8> {
+    let pool = match get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"set_lastsync",
+                line!(),
+                &"Could not get database",
+            );
+            return Err(-1);
+        }
+    };
+    let query = match build_query("UPDATE §§.Users SET lastsync = ? WHERE id = ?") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"database.rs",
+                &"set_lastsync",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-3);
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"set_lastsync",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return Err(-2);
+        }
+    };
+    match stmt.execute((lastsync, uid)) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"database.rs",
+                &"set_lastsync",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return Err(-4);
+        }
+    };
+    return Ok(0);
 }

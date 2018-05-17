@@ -1,27 +1,27 @@
-use tiny_http as http;
+use ascii::AsciiString;
 use base64;
 use chrono::prelude::{DateTime, Local};
 use chrono::{Datelike, TimeZone};
-use ascii::AsciiString;
+use fs_extra::file::{move_file, CopyOptions};
 use futures::Future;
 use futures::sync::oneshot;
-use multipart::server::{Entries, Multipart, SaveResult};
 use multipart::server::save::{PartialReason, SaveDir, SavedData, TempDir};
-use fs_extra::file::{move_file, CopyOptions};
+use multipart::server::{Entries, Multipart, SaveResult};
+use tiny_http as http;
 
+use std::error::Error;
 use std::fs::{self, File};
-use std::path::Path;
-use std::io::{BufRead, BufReader, Read, Write};
 use std::io::Seek;
 use std::io::SeekFrom;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::path::Path;
 use std::str::FromStr;
-use std::thread;
 use std::sync::Arc;
-use std::error::Error;
+use std::thread;
 
+use common;
 use database;
 use maintenance;
-use common;
 
 pub fn answer(request: http::Request) {
     let mut user = String::new();
@@ -40,8 +40,18 @@ pub fn answer(request: http::Request) {
                 if coded_value1.starts_with("Basic ") {
                     coded_value = coded_value1.split_off(6);
                 }
-                let bytes = base64::decode(&coded_value).unwrap();
-                let value = String::from_utf8(bytes).unwrap();
+                let bytes = match base64::decode(&coded_value) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        continue;
+                    }
+                };
+                let value = match String::from_utf8(bytes) {
+                    Ok(s) => s,
+                    Err(_) => {
+                        continue;
+                    }
+                };
                 let split: Vec<String> = value.split(":").map(|s| s.to_string()).collect();
                 user.push_str(&split[0]);
                 pass.push_str(&split[1]);
@@ -74,19 +84,25 @@ pub fn answer(request: http::Request) {
             }
         }
     }
-    let uid = database::get_user_id_and_verify(&user, &pass);
-    if uid <= 0 {
-        let mut message = String::from("Bad Login: ");
-        message.push_str(&user);
-        message.push_str(" with password: ");
-        message.push_str(&pass);
-        message.push_str(&format!(" and URL: {}", request.url()));
-        println!("{}", &message);
-        let response =
-            http::Response::from_string(message).with_status_code(http::StatusCode::from(401));
-        let _ = request.respond(response);
-        return;
-    }
+    let uid = match database::get_user_id_and_verify(&user, &pass) {
+        Ok(i) => i,
+        Err(-5) => {
+            let mut message = String::from("Bad Login: ");
+            message.push_str(&user);
+            message.push_str(" with password: ");
+            message.push_str(&pass);
+            message.push_str(&format!(" and URL: {}", request.url()));
+            println!("{}", &message);
+            let response =
+                http::Response::from_string(message).with_status_code(http::StatusCode::from(401));
+            let _ = request.respond(response);
+            return;
+        }
+        Err(_) => {
+            internal_error(request, "Error while verifying login");
+            return;
+        }
+    };
 
     if request.url().starts_with("/media/load/") {
         get_media_url(String::from(request.url()), uid, request, range);
@@ -163,7 +179,7 @@ pub fn echo(mut request: http::Request) {
     let _ = request.respond(response);
 }
 
-fn get_media_intern(uid: i64, media_id: i64, request: http::Request, range: u64) {
+fn get_media_intern(uid: u64, media_id: u64, request: http::Request, range: u64) {
     let mut picpath = String::new();
     let path;
     let pic = match database::get_mediainfo(uid, media_id) {
@@ -176,9 +192,21 @@ fn get_media_intern(uid: i64, media_id: i64, request: http::Request, range: u64)
     picpath.push_str(&pic.get_full_path());
     path = Path::new(&picpath);
 
-    let mut file = File::open(path).unwrap();
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            internal_error(request, &format!("Could not open file: {}", e));
+            return;
+        }
+    };
 
-    let length = file.metadata().unwrap().len();
+    let length = match file.metadata() {
+        Ok(m) => m.len(),
+        Err(e) => {
+            internal_error(request, &format!("Could not read file: {}", e));
+            return;
+        }
+    };
 
     let mut status = http::StatusCode(200);
     let mut response;
@@ -190,7 +218,15 @@ fn get_media_intern(uid: i64, media_id: i64, request: http::Request, range: u64)
     }
 
     if range > 0 {
-        file.seek(SeekFrom::Start(range)).unwrap();
+        match file.seek(SeekFrom::Start(range)) {
+            Ok(_) => {
+                //nothing
+            }
+            Err(e) => {
+                internal_error(request, &format!("Could not seek in file: {}", e));
+                return;
+            }
+        };
     }
 
     response = http::Response::new(
@@ -202,54 +238,78 @@ fn get_media_intern(uid: i64, media_id: i64, request: http::Request, range: u64)
     );
 
     let header = http::Header {
-        field: http::HeaderField::from_str("Content-Range").unwrap(),
-        value: AsciiString::from_str(&format!("bytes {}-{}", range, length)).unwrap(),
+        field: match http::HeaderField::from_str("Content-Range") {
+            Ok(f) => f,
+            Err(_) => {
+                internal_error(request, "Could not create header field");
+                return;
+            }
+        },
+        value: match AsciiString::from_str(&format!("bytes {}-{}", range, length)) {
+            Ok(s) => s,
+            Err(_) => {
+                internal_error(request, "Could not create header value string");
+                return;
+            }
+        },
     };
     response.add_header(header);
 
     let header = http::Header {
-        field: http::HeaderField::from_str("Accept-Ranges").unwrap(),
-        value: AsciiString::from_str("none").unwrap(),
+        field: match http::HeaderField::from_str("Accept-Ranges") {
+            Ok(f) => f,
+            Err(_) => {
+                internal_error(request, "Could not create header field");
+                return;
+            }
+        },
+        value: match AsciiString::from_str("none") {
+            Ok(s) => s,
+            Err(_) => {
+                internal_error(request, "Could not create header value string");
+                return;
+            }
+        },
     };
     response.add_header(header);
 
     let _ = request.respond(response);
 }
 
-pub fn get_media_url(url: String, uid: i64, request: http::Request, range: u64) {
+pub fn get_media_url(url: String, uid: u64, request: http::Request, range: u64) {
     let string = String::from(url.trim_matches('/'));
     let values: Vec<&str> = string.split("/").collect::<Vec<&str>>();
     let mut id_str = String::new();
     if values.len() > 2 {
         id_str.push_str(values[2]);
     } else {
-        internal_error(request, String::from("Could not read media id"));
+        internal_error(request, "Could not read media id");
         return;
     }
-    let id = match id_str.parse::<i64>() {
+    let id = match id_str.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read media id"));
+            internal_error(request, "Could not read media id");
             return;
         }
     };
     get_media_intern(uid, id, request, range);
 }
 
-pub fn stream_media(url: String, uid: i64, request: http::Request) {
+pub fn stream_media(url: String, uid: u64, request: http::Request) {
     let string = String::from(url.trim_matches('/'));
     let values: Vec<&str> = string.split("/").collect::<Vec<&str>>();
     let mut id_str = String::new();
     if values.len() > 3 {
         id_str.push_str(values[2]);
     } else {
-        internal_error(request, String::from("Could not read media id"));
+        internal_error(request, "Could not read media id");
         return;
     }
-    let id = match id_str.parse::<i64>() {
+    let id = match id_str.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read media id"));
+            internal_error(request, "Could not read media id");
             return;
         }
     };
@@ -262,7 +322,13 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
     };
 
     if values[3] == "mpd" {
-        let mpd_path = pic.get_mpd_path();
+        let mpd_path = match pic.get_mpd_path() {
+            Ok(p) => p,
+            Err(_) => {
+                internal_error(request, "Could not load mpd path");
+                return;
+            }
+        };
         let path = Path::new(&mpd_path);
         let out = match File::open(path) {
             Ok(v) => v,
@@ -271,10 +337,7 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
                 let tmp = match File::open(path) {
                     Ok(v) => v,
                     Err(_) => {
-                        internal_error(
-                            request,
-                            format!("Could not open file: {}", &mpd_path).to_string(),
-                        );
+                        internal_error(request, &format!("Could not open file: {}", &mpd_path));
                         return;
                     }
                 };
@@ -284,7 +347,7 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
         let response = http::Response::from_file(out);
         let _ = request.respond(response);
     } else {
-        pic.prepare_for_streaming();
+        let _ = pic.prepare_for_streaming();
         let mut filepath = pic.get_streaming_path();
         if !filepath.ends_with("/") {
             filepath.push('/');
@@ -298,10 +361,7 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
                 let tmp = match File::open(path) {
                     Ok(v) => v,
                     Err(_) => {
-                        internal_error(
-                            request,
-                            format!("Could not open file: {}", &filepath).to_string(),
-                        );
+                        internal_error(request, &format!("Could not open file: {}", &filepath));
                         return;
                     }
                 };
@@ -313,24 +373,30 @@ pub fn stream_media(url: String, uid: i64, request: http::Request) {
     }
 }
 
-pub fn get_media_stream(mut request: http::Request, uid: i64, range: u64) {
+pub fn get_media_stream(mut request: http::Request, uid: u64, range: u64) {
     let mut id_str: String = String::new();
     {
         let mut reader = BufReader::new(request.as_reader());
         let _ = reader.read_line(&mut id_str);
     }
-    let id = match id_str.parse::<i64>() {
+    let id = match id_str.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read picture id"));
+            internal_error(request, "Could not read picture id");
             return;
         }
     };
     get_media_intern(uid, id, request, range);
 }
 
-pub fn get_libs(request: http::Request, uid: i64) {
-    let libs = database::get_libs(uid);
+pub fn get_libs(request: http::Request, uid: u64) {
+    let libs = match database::get_libs(uid) {
+        Ok(l) => l,
+        Err(_) => {
+            internal_error(request, "Could not load libraries from database");
+            return;
+        }
+    };
     let iter = libs.into_iter();
     let mut out = String::new();
     let mut first = true;
@@ -345,34 +411,48 @@ pub fn get_libs(request: http::Request, uid: i64) {
         out.push_str(&name);
         out.push(';');
         out.push_str(&count.to_string());
-        out.push(';');
-        out.push_str(&thumb1.to_string());
-        out.push(';');
-        out.push_str(&thumb2.to_string());
-        out.push(';');
-        out.push_str(&thumb3.to_string());
-        out.push(';');
-        out.push_str(&thumb4.to_string());
+        if thumb1 > 0 {
+            out.push(';');
+            out.push_str(&thumb1.to_string());
+        }
+        if thumb2 > 0 {
+            out.push(';');
+            out.push_str(&thumb2.to_string());
+        }
+        if thumb3 > 0 {
+            out.push(';');
+            out.push_str(&thumb3.to_string());
+        }
+        if thumb4 > 0 {
+            out.push(';');
+            out.push_str(&thumb4.to_string());
+        }
     }
 
     let response = http::Response::from_string(out);
     let _ = request.respond(response);
 }
 
-pub fn get_lib_mediaids(mut request: http::Request, uid: i64) {
+pub fn get_lib_mediaids(mut request: http::Request, uid: u64) {
     let mut id_str = String::new();
     {
         let mut reader = BufReader::new(request.as_reader());
         let _ = reader.read_line(&mut id_str);
     }
-    let id = match id_str.parse::<i64>() {
+    let id = match id_str.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read library id"));
+            internal_error(request, "Could not read library id");
             return;
         }
     };
-    let ids = database::get_pics_by_lib(id, uid);
+    let ids = match database::get_pics_by_lib(id, uid) {
+        Ok(i) => i,
+        Err(_) => {
+            internal_error(request, "Could not load library pics from database");
+            return;
+        }
+    };
     let mut out = String::new();
     let mut first = true;
     for (id, name, duration, size) in ids {
@@ -388,17 +468,17 @@ pub fn get_lib_mediaids(mut request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
-pub fn get_mediainfo(mut request: http::Request, uid: i64) {
+pub fn get_mediainfo(mut request: http::Request, uid: u64) {
     let mut id: String = String::new();
     let media;
     {
         let mut reader = BufReader::new(request.as_reader());
         let _ = reader.read_line(&mut id);
     }
-    let pic_id = match id.parse::<i64>() {
+    let pic_id = match id.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read picture id"));
+            internal_error(request, "Could not read picture id");
             return;
         }
     };
@@ -415,7 +495,7 @@ pub fn get_mediainfo(mut request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
-pub fn get_mediathumb(mut request: http::Request, uid: i64) {
+pub fn get_mediathumb(mut request: http::Request, uid: u64) {
     let mut picpath = String::new();
     let path;
     let mut id: String = String::new();
@@ -423,10 +503,10 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
         let mut reader = BufReader::new(request.as_reader());
         let _ = reader.read_line(&mut id);
     }
-    let pic_id = match id.parse::<i64>() {
+    let pic_id = match id.parse::<u64>() {
         Ok(n) => n,
         Err(_) => {
-            internal_error(request, String::from("Could not read picture id"));
+            internal_error(request, "Could not read picture id");
             return;
         }
     };
@@ -438,7 +518,14 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
             return;
         }
     };
-    picpath.push_str(&pic.get_thumbnail(true));
+    let thumbpath = match pic.get_thumbnail(true) {
+        Ok(s) => s,
+        Err(_) => {
+            internal_error(request, "Could not get thumbnail path");
+            return;
+        }
+    };
+    picpath.push_str(&thumbpath);
     path = Path::new(&picpath);
     let out = match File::open(path) {
         Ok(v) => v,
@@ -447,7 +534,7 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
             let tmp = match File::open(path) {
                 Ok(v) => v,
                 Err(_) => {
-                    internal_error(request, String::from("Could not open file"));
+                    internal_error(request, "Could not open file");
                     return;
                 }
             };
@@ -458,12 +545,51 @@ pub fn get_mediathumb(mut request: http::Request, uid: i64) {
     let _ = request.respond(response);
 }
 
-fn mediaupload_multipart(mut request: http::Request, uid: i64) {
-    let tmp_path = database::get_userpath(uid);
-    create_dirs(&tmp_path, uid);
-    let tmp_dir = TempDir::new_in(&tmp_path, ".tmp").unwrap();
+fn mediaupload_multipart(mut request: http::Request, uid: u64) {
+    let tmp_path = match database::get_userpath(uid) {
+        Ok(p) => p,
+        Err(_) => {
+            internal_error(request, "Could not load userpath from database");
+            return;
+        }
+    };
+    match create_dirs(&tmp_path, uid) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(_) => {
+            internal_error(request, "Could not create temporary directory");
+            return;
+        }
+    }
+    let tmp_dir = match TempDir::new_in(&tmp_path, ".tmp") {
+        Ok(d) => d,
+        Err(e) => {
+            common::log_error(
+                &"network.rs",
+                &"mediaupload_multipart",
+                line!(),
+                &format!("Could not open temp dir: {}", e),
+            );
+            internal_error(request, &format!("Could not open temp dir: {}", e));
+            return;
+        }
+    };
 
-    let mut entries = Entries::new(SaveDir::Temp(TempDir::new(&tmp_path).unwrap()));
+    let dir = match TempDir::new(&tmp_path) {
+        Ok(d) => d,
+        Err(e) => {
+            common::log_error(
+                &"network.rs",
+                &"mediaupload_multipart",
+                line!(),
+                &format!("Could not open temp dir: {}", e),
+            );
+            internal_error(request, &format!("Could not open temp dir: {}", e));
+            return;
+        }
+    };
+    let mut entries = Entries::new(SaveDir::Temp(dir));
 
     let mut error = false;
     let mut message = format!("Multipart data corrupt");
@@ -505,88 +631,171 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
     }
 
     if not_multipart {
-        internal_error(request, String::from("Request is not multipart"));
+        internal_error(request, "Request is not multipart");
         return;
     }
     if error {
-        internal_error(request, message);
+        internal_error(request, &message);
         return;
     }
 
-    let bucket = extract_from_form(&entries, "bucket");
-    let filename = extract_from_form(&entries, "filename");
-    let created = match extract_from_form(&entries, "created").parse::<u64>() {
-        Ok(v) => v,
+    let bucket = match extract_from_form(&entries, "bucket") {
+        Ok(s) => s,
+        Err(_) => {
+            internal_error(request, "Could not read bucket");
+            return;
+        }
+    };
+    let filename = match extract_from_form(&entries, "filename") {
+        Ok(s) => s,
+        Err(_) => {
+            internal_error(request, "Could not read filename");
+            return;
+        }
+    };
+    let created = match extract_from_form(&entries, "created") {
+        Ok(v) => match v.parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => 0,
+        },
         Err(_) => 0,
     };
-    let modified = match extract_from_form(&entries, "modified").parse::<u64>() {
-        Ok(v) => v,
+    let modified = match extract_from_form(&entries, "modified") {
+        Ok(v) => match v.parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => 0,
+        },
         Err(_) => 0,
     };
-    let lat = match extract_from_form(&entries, "latitude").parse::<f64>() {
-        Ok(v) => v,
+    let lat = match extract_from_form(&entries, "latitude") {
+        Ok(v) => match v.parse::<f64>() {
+            Ok(v) => v,
+            Err(_) => 0.0,
+        },
         Err(_) => 0.0,
     };
-    let lon = match extract_from_form(&entries, "longitude").parse::<f64>() {
-        Ok(v) => v,
+    let lon = match extract_from_form(&entries, "longitude") {
+        Ok(v) => match v.parse::<f64>() {
+            Ok(v) => v,
+            Err(_) => 0.0,
+        },
         Err(_) => 0.0,
     };
-    let duration = match extract_from_form(&entries, "duration").parse::<i64>() {
-        Ok(v) => v,
+    let duration = match extract_from_form(&entries, "duration") {
+        Ok(v) => match v.parse::<i64>() {
+            Ok(v) => v,
+            Err(_) => -1,
+        },
         Err(_) => -1,
     };
-    let h_res = match extract_from_form(&entries, "horizontal resolution").parse::<u64>() {
-        Ok(v) => v,
+    let h_res = match extract_from_form(&entries, "horizontal resolution") {
+        Ok(v) => match v.parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => 0,
+        },
         Err(_) => 0,
     };
-    let v_res = match extract_from_form(&entries, "vertical resolution").parse::<u64>() {
-        Ok(v) => v,
+    let v_res = match extract_from_form(&entries, "vertical resolution") {
+        Ok(v) => match v.parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => 0,
+        },
         Err(_) => 0,
     };
-    let filesize = match extract_from_form(&entries, "size").parse::<u64>() {
-        Ok(v) => v,
+    let filesize = match extract_from_form(&entries, "size") {
+        Ok(v) => match v.parse::<u64>() {
+            Ok(v) => v,
+            Err(_) => 0,
+        },
         Err(_) => 0,
     };
 
-    let path = build_path(uid, created, modified, &bucket);
+    let path = match build_path(uid, created, modified, &bucket) {
+        Ok(p) => p,
+        Err(_) => {
+            internal_error(request, "Could not build target path");
+            return;
+        }
+    };
 
     let path2 = format!("{}", &path);
     let filename2 = format!("{}", &filename);
-    let (tx, rx) = oneshot::channel::<i64>();
+    let (tx, rx) = oneshot::channel::<Result<u64, i8>>();
     thread::spawn(move || {
-        let id = database::add_media(
-            path2,
-            filename2,
-            bucket,
-            created,
-            modified,
-            lat,
-            lon,
-            h_res,
-            v_res,
-            duration,
-            uid,
-        );
-        let _ = tx.send(id);
+        if path2.ends_with(".dng") {
+            let _ = tx.send(Ok(0));
+        } else {
+            let id = database::add_media(
+                path2,
+                filename2,
+                bucket,
+                created,
+                modified,
+                lat,
+                lon,
+                h_res,
+                v_res,
+                duration,
+                filesize,
+                uid,
+            );
+            let _ = tx.send(id);
+        }
     });
 
     let mut fullpath = String::new();
     fullpath.push_str(&path);
     fullpath.push_str(&filename);
 
-    error = create_dirs(&path, uid);
+    error = match create_dirs(&path, uid) {
+        Ok(_) => false,
+        Err(_) => true,
+    };
 
-    let _ = move_file(
-        extract_from_form(&entries, "file"),
-        &fullpath,
-        &CopyOptions::new(),
-    );
+    let file = match extract_from_form(&entries, "file") {
+        Ok(f) => f,
+        Err(_) => {
+            internal_error(request, "Could not read file");
+            let id: u64 = match rx.wait() {
+                Ok(r) => match r {
+                    Ok(i) => i,
+                    Err(_) => {
+                        common::log_error(
+                            &"network.rs",
+                            &"mediaupload_multipart",
+                            line!(),
+                            &"Could not add to database",
+                        );
+                        return;
+                    }
+                },
+                Err(_) => {
+                    common::log_error(
+                        &"network.rs",
+                        &"mediaupload_multipart",
+                        line!(),
+                        &"Could not unwrap channel",
+                    );
+                    return;
+                }
+            };
+            let _ = database::remove_by_id(id);
+            return;
+        }
+    };
+    let _ = move_file(file, &fullpath, &CopyOptions::new());
 
     let f: File = match File::open(Path::new(&fullpath)) {
         Ok(v) => v,
         Err(_) => {
             error = true;
-            File::open("/tmp/dummy").unwrap()
+            match File::open("/tmp/dummy") {
+                Ok(f) => f,
+                Err(e) => {
+                    internal_error(request, &format!("Could not open dummy file: {}", e));
+                    return;
+                }
+            }
         }
     };
 
@@ -609,49 +818,105 @@ fn mediaupload_multipart(mut request: http::Request, uid: i64) {
     }
 
     let _ = thread::spawn(move || {
-        let (user, group, visible) = database::ownership_info(uid);
-        common::change_owner(&fullpath, &user, &group, visible);
+        let (user, group, visible) = match database::ownership_info(uid) {
+            Ok(i) => i,
+            Err(_) => {
+                common::log_error(
+                    &"network.rs",
+                    &"mediaupload_multipart",
+                    line!(),
+                    &"Could not get ownership info",
+                );
+                ("root".to_string(), "users".to_string(), true)
+            }
+        };
+        if !common::change_owner(&fullpath, &user, &group, visible) {
+            common::log_error(
+                &"network.rs",
+                &"mediaupload_multipart",
+                line!(),
+                &"Could not set ownership info",
+            );
+        }
     });
 
     if error {
-        internal_error(request, String::from("Error creating file"));
+        internal_error(request, "Error creating file");
         return;
     }
 
-    let id: i64 = rx.wait().unwrap();
-
-    if id < 0 {
-        internal_error(
-            request,
-            String::from("Error adding file to database, it was created successfully though"),
-        );
-        return;
-    }
+    let id: u64 = match rx.wait() {
+        Ok(r) => match r {
+            Ok(i) => i,
+            Err(_) => {
+                internal_error(
+                    request,
+                    "Error adding file to database, it was created successfully though",
+                );
+                common::log_error(
+                    &"network.rs",
+                    &"mediaupload_multipart",
+                    line!(),
+                    &"Could not add to database",
+                );
+                return;
+            }
+        },
+        Err(_) => {
+            internal_error(
+                        request,
+                        "We're not shure if the file was added file to database, it was created successfully though",
+                    );
+            common::log_error(
+                &"network.rs",
+                &"mediaupload_multipart",
+                line!(),
+                &"Could not unwrap channel",
+            );
+            return;
+        }
+    };
 
     maintenance::add_id(id);
     let response = http::Response::from_string(id.to_string());
     let _ = request.respond(response);
 }
 
-fn extract_from_form(entries: &Entries, key: &str) -> String {
-    let data = entries.fields.get(&Arc::new(String::from(key))).unwrap();
+fn extract_from_form(entries: &Entries, key: &str) -> Result<String, i8> {
+    let data = match entries.fields.get(&Arc::new(String::from(key))) {
+        Some(d) => d,
+        None => {
+            common::log_error(
+                &"network.rs",
+                &"extract_from_form",
+                line!(),
+                &"Could not get data",
+            );
+            return Err(-1);
+        }
+    };
     for i in 0..data.len() {
         match data[i].data {
             SavedData::Text(ref string) => {
-                return format!("{}", string);
+                return Ok(format!("{}", string));
             }
             SavedData::File(ref path_buf, _) => {
-                return format!("{}", path_buf.as_path().to_str().unwrap());
+                return match path_buf.as_path().to_str() {
+                    Some(s) => Ok(format!("{}", s)),
+                    None => {
+                        continue;
+                    }
+                }
             }
             _ => {
                 continue;
             }
         }
     }
-    return String::new();
+    return Err(-2);
 }
 
-pub fn mediaupload(mut request: http::Request, uid: i64) {
+pub fn mediaupload(mut request: http::Request, uid: u64) {
     let mut bucket = String::new();
     let mut filename = String::new();
     let lat: f64;
@@ -662,9 +927,25 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
     let h_res: u64;
     let v_res: u64;
     let filesize: u64;
-    let mut error: bool;
+    let mut error: bool = false;
     let path;
-    let (tx, rx) = oneshot::channel::<i64>();
+    let (tx, rx) = oneshot::channel::<Result<u64, i8>>();
+    let mut fullpath = String::new();
+
+    let dummy_file: File = match File::open("/tmp/dummy") {
+        Ok(f) => f,
+        Err(e) => {
+            internal_error(request, &format!("Could not open dummy file: {}", e));
+            return;
+        }
+    };
+    let mut f: File = match File::open("/tmp/dummy") {
+        Ok(f) => f,
+        Err(e) => {
+            internal_error(request, &format!("Could not open dummy file: {}", e));
+            return;
+        }
+    };
     {
         let mut line = String::new();
         let mut reader = BufReader::new(request.as_reader());
@@ -688,62 +969,113 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
         line = String::new();
         let _ = reader.read_line(&mut line);
         line = sanitize(line);
-        created = line.parse::<u64>().unwrap();
-        line = String::new();
-        let _ = reader.read_line(&mut line);
-        line = sanitize(line);
-        modified = line.parse::<u64>().unwrap();
-        line = String::new();
-        let _ = reader.read_line(&mut line);
-        line = sanitize(line);
-        h_res = line.parse::<u64>().unwrap();
-        line = String::new();
-        let _ = reader.read_line(&mut line);
-        line = sanitize(line);
-        v_res = line.parse::<u64>().unwrap();
-        line = String::new();
-        let _ = reader.read_line(&mut line);
-        line = sanitize(line);
-        duration = line.parse::<i64>().unwrap();
-        line = String::new();
-        let _ = reader.read_line(&mut line);
-        line = sanitize(line);
-        filesize = line.parse::<u64>().unwrap();
-
-        path = build_path(uid, created, modified, &bucket);
-
-        let path2 = format!("{}", &path);
-        let filename2 = format!("{}", &filename);
-        thread::spawn(move || {
-            let id = database::add_media(
-                path2,
-                filename2,
-                bucket,
-                created,
-                modified,
-                lat,
-                lon,
-                h_res,
-                v_res,
-                duration,
-                uid,
-            );
-            let _ = tx.send(id);
-        });
-
-        let mut fullpath = String::new();
-        fullpath.push_str(&path);
-        fullpath.push_str(&filename);
-
-        error = create_dirs(&path, uid);
-
-        let mut f: File = match File::create(Path::new(&fullpath)) {
-            Ok(v) => v,
+        created = match line.parse::<u64>() {
+            Ok(d) => d,
             Err(_) => {
                 error = true;
-                File::open("/tmp/dummy").unwrap()
+                0
             }
         };
+        line = String::new();
+        let _ = reader.read_line(&mut line);
+        line = sanitize(line);
+        modified = match line.parse::<u64>() {
+            Ok(d) => d,
+            Err(_) => {
+                error = true;
+                0
+            }
+        };
+        line = String::new();
+        let _ = reader.read_line(&mut line);
+        line = sanitize(line);
+        h_res = match line.parse::<u64>() {
+            Ok(d) => d,
+            Err(_) => {
+                error = true;
+                0
+            }
+        };
+        line = String::new();
+        let _ = reader.read_line(&mut line);
+        line = sanitize(line);
+        v_res = match line.parse::<u64>() {
+            Ok(d) => d,
+            Err(_) => {
+                error = true;
+                0
+            }
+        };
+        line = String::new();
+        let _ = reader.read_line(&mut line);
+        line = sanitize(line);
+        duration = match line.parse::<i64>() {
+            Ok(d) => d,
+            Err(_) => {
+                error = true;
+                -1
+            }
+        };
+        line = String::new();
+        let _ = reader.read_line(&mut line);
+        line = sanitize(line);
+        filesize = match line.parse::<u64>() {
+            Ok(d) => d,
+            Err(_) => {
+                error = true;
+                0
+            }
+        };
+
+        path = match build_path(uid, created, modified, &bucket) {
+            Ok(p) => p,
+            Err(_) => {
+                error = true;
+                String::new()
+            }
+        };
+
+        if !error {
+            let path2 = format!("{}", &path);
+            let filename2 = format!("{}", &filename);
+            thread::spawn(move || {
+                if path2.ends_with(".dng") {
+                    let _ = tx.send(Ok(0));
+                } else {
+                    let id = database::add_media(
+                        path2,
+                        filename2,
+                        bucket,
+                        created,
+                        modified,
+                        lat,
+                        lon,
+                        h_res,
+                        v_res,
+                        duration,
+                        filesize,
+                        uid,
+                    );
+                    let _ = tx.send(id);
+                }
+            });
+
+            fullpath.push_str(&path);
+            fullpath.push_str(&filename);
+
+            error = match create_dirs(&path, uid) {
+                Ok(_) => false,
+                Err(_) => true,
+            };
+
+            f = match File::create(Path::new(&fullpath)) {
+                Ok(v) => v,
+                Err(_) => {
+                    error = true;
+                    dummy_file
+                }
+            };
+        }
         if !error {
             let mut buf: [u8; 32 * 1024] = [0; 32 * 1024];
             loop {
@@ -777,71 +1109,125 @@ pub fn mediaupload(mut request: http::Request, uid: i64) {
                 }
             }
         }
-
-        if !error {
-            match f.metadata() {
-                Err(_) => {
-                    let _ = fs::remove_file(format!("{}", &fullpath));
-                    error = true;
-                }
-                Ok(v) => {
-                    if v.len() != filesize {
-                        match fs::remove_file(format!("{}", &fullpath)) {
-                            Ok(_) => {}
-                            Err(_) => {}
-                        };
-                        error = true
-                    }
-                }
-            };
-        }
-
-        let _ = thread::spawn(move || {
-            let (user, group, visible) = database::ownership_info(uid);
-            common::change_owner(&fullpath, &user, &group, visible);
-        });
     }
+    if error {
+        internal_error(request, "Could not build target path");
+        return;
+    }
+
+    match f.metadata() {
+        Err(_) => {
+            let _ = fs::remove_file(format!("{}", &fullpath));
+            error = true;
+        }
+        Ok(v) => {
+            if v.len() != filesize {
+                match fs::remove_file(format!("{}", &fullpath)) {
+                    Ok(_) => {}
+                    Err(_) => {}
+                };
+                error = true
+            }
+        }
+    };
+
+    let _ = thread::spawn(move || {
+        let (user, group, visible) = match database::ownership_info(uid) {
+            Ok(t) => t,
+            Err(_) => {
+                common::log_error(
+                    &"network.rs",
+                    &"mediaupload_multipart",
+                    line!(),
+                    &"Could not get ownership info",
+                );
+                ("root".to_string(), "users".to_string(), true)
+            }
+        };
+        common::change_owner(&fullpath, &user, &group, visible);
+    });
 
     if error {
-        internal_error(request, String::from("Error creating file"));
+        internal_error(request, "Error creating file");
         return;
     }
 
-    let id: i64 = rx.wait().unwrap();
-
-    if id < 0 {
-        internal_error(
-            request,
-            String::from("Error adding file to database, it was created successfully though"),
-        );
-        return;
-    }
+    let id: u64 = match rx.wait() {
+        Ok(r) => match r {
+            Ok(i) => i,
+            Err(_) => {
+                internal_error(
+                    request,
+                    "Error adding file to database, it was created successfully though",
+                );
+                common::log_error(
+                    &"network.rs",
+                    &"mediaupload_multipart",
+                    line!(),
+                    &"Could not add to database",
+                );
+                return;
+            }
+        },
+        Err(_) => {
+            internal_error(
+                        request,
+                        "We're not shure if the file was added file to database, it was created successfully though",
+                    );
+            common::log_error(
+                &"network.rs",
+                &"mediaupload_multipart",
+                line!(),
+                &"Could not unwrap channel",
+            );
+            return;
+        }
+    };
 
     maintenance::add_id(id);
     let response = http::Response::from_string(id.to_string());
     let _ = request.respond(response);
 }
 
-fn create_dirs(path: &str, uid: i64) -> bool {
-    let mut error = false;
+fn create_dirs(path: &str, uid: u64) -> Result<String, i8> {
     let p = Path::new(&path);
-    let mut userpath = String::from(database::get_userpath(uid));
-    if userpath.ends_with('/') {
+    let mut userpath = match database::get_userpath(uid) {
+        Ok(s) => String::from(s),
+        Err(_) => {
+            return Err(-1);
+        }
+    };
+    if !userpath.ends_with('/') {
         userpath.push('/');
     }
     let user_p = Path::new(&path);
     let user_p_exists = user_p.exists();
     if !p.exists() {
         match fs::create_dir_all(Path::new(&path)) {
-            Err(_) => error = true,
-            Ok(_) => {}
+            Err(_) => {
+                return Err(-2);
+            }
+            Ok(_) => {
+                //nothing
+            }
         };
         let mut tmp_path: String = format!("{}", &path);
         let _ = thread::spawn(move || {
             if !tmp_path.ends_with('/') {
                 tmp_path.push('/');
             }
-            let (user, group, visible) = database::ownership_info(uid);
+            let (user, group, visible) = match database::ownership_info(uid) {
+                Ok(t) => t,
+                Err(_) => {
+                    common::log_error(
+                        &"network.rs",
+                        &"mediaupload_multipart",
+                        line!(),
+                        &"Could not get ownership info",
+                    );
+                    ("root".to_string(), "users".to_string(), true)
+                }
+            };
 
             while tmp_path.len() > userpath.len() && tmp_path != "/" {
                 common::change_owner(&tmp_path, &user, &group, visible);
@@ -857,11 +1243,16 @@ fn create_dirs(path: &str, uid: i64) -> bool {
             }
         });
     }
-    error
+    Ok(String::from(path))
 }
 
-fn build_path(uid: i64, created: u64, modified: u64, bucket: &str) -> String {
-    let mut path = database::get_userpath(uid);
+fn build_path(uid: u64, created: u64, modified: u64, bucket: &str) -> Result<String, i8> {
+    let mut path = match database::get_userpath(uid) {
+        Ok(p) => p,
+        Err(_) => {
+            return Err(-1);
+        }
+    };
     if !path.ends_with('/') {
         path.push('/');
     }
@@ -873,7 +1264,7 @@ fn build_path(uid: i64, created: u64, modified: u64, bucket: &str) -> String {
     if !path.ends_with('/') {
         path.push('/');
     }
-    path
+    Ok(path)
 }
 
 fn sanitize(string: String) -> String {
@@ -907,11 +1298,17 @@ fn build_path_date(created: u64, bucket: &str) -> String {
     let mut month_text;
     let locale = common::get_locale();
     let key: String = format!("{}{}", locale, month);
-    month_text = common::get_string(&key);
+    month_text = match common::get_string(&key) {
+        Ok(s) => s,
+        Err(_) => String::new(),
+    };
     if month_text == String::new() && locale.len() > 2 {
         let (first, _) = locale.split_at(2);
         let key: String = format!("{}{}", first, month);
-        month_text = common::get_string(&key);
+        month_text = match common::get_string(&key) {
+            Ok(s) => s,
+            Err(_) => String::new(),
+        };
     }
     let mut month_nr = String::new();
     if month < 10 {
@@ -921,13 +1318,19 @@ fn build_path_date(created: u64, bucket: &str) -> String {
     format!("{}/{} {}/{}/", year, month_nr, month_text, bucket)
 }
 
-pub fn get_lastsync(request: http::Request, uid: i64) {
-    let response =
-        http::Response::from_string(String::from(database::get_lastsync(uid).to_string()));
+pub fn get_lastsync(request: http::Request, uid: u64) {
+    let lastsync = match database::get_lastsync(uid) {
+        Ok(s) => s,
+        Err(_) => {
+            internal_error(request, "Could not get lastsync from database");
+            return;
+        }
+    };
+    let response = http::Response::from_string(format!("{}", lastsync).to_string());
     let _ = request.respond(response);
 }
 
-pub fn set_lastsync(mut request: http::Request, uid: i64) {
+pub fn set_lastsync(mut request: http::Request, uid: u64) {
     let lastsync: u64;
     let mut read_string = String::new();
     {
@@ -937,25 +1340,33 @@ pub fn set_lastsync(mut request: http::Request, uid: i64) {
     lastsync = match read_string.parse::<u64>() {
         Ok(o) => o,
         Err(_) => {
-            internal_error(request, String::from("Error parsing lastsync to u64"));
+            internal_error(request, "Error parsing lastsync to u64");
             return;
         }
     };
-    database::set_lastsync(uid, lastsync);
+    match database::set_lastsync(uid, lastsync) {
+        Ok(_) => {
+            //nothing
+        }
+        Err(_) => {
+            internal_error(request, "Could not set lastsync");
+            return;
+        }
+    }
     let response = http::Response::from_string(String::from("Success"));
     let _ = request.respond(response);
 }
 
-pub fn mediasearch(request: http::Request, uid: i64) {
+pub fn mediasearch(request: http::Request, uid: u64) {
     let _ = uid + 1;
-    internal_error(request, String::from("Feature not implemented yet"));
+    internal_error(request, "Feature not implemented yet");
 }
 
-pub fn internal_error(request: http::Request, message: String) {
+pub fn internal_error(request: http::Request, message: &str) {
     println!(
         "Internal Error on URL: {} with message: {}",
         request.url(),
-        &message
+        message
     );
     let response =
         http::Response::from_string(message).with_status_code(http::StatusCode::from(500));
