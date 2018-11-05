@@ -3,8 +3,8 @@ use base64;
 use chrono::prelude::{DateTime, Local};
 use chrono::{Datelike, TimeZone};
 use fs_extra::file::{move_file, CopyOptions};
-use futures::Future;
 use futures::sync::oneshot;
+use futures::Future;
 use multipart::server::save::{PartialReason, SaveDir, SavedData, TempDir};
 use multipart::server::{Entries, Multipart, SaveResult};
 use tiny_http as http;
@@ -726,18 +726,8 @@ fn mediaupload_multipart(mut request: http::Request, uid: u64) {
             let _ = tx.send(Ok(0));
         } else {
             let id = database::add_media(
-                path2,
-                filename2,
-                bucket,
-                created,
-                modified,
-                lat,
-                lon,
-                h_res,
-                v_res,
-                duration,
-                filesize,
-                uid,
+                path2, filename2, bucket, created, modified, lat, lon, h_res, v_res, duration,
+                filesize, uid,
             );
             let _ = tx.send(id);
         }
@@ -865,7 +855,7 @@ fn mediaupload_multipart(mut request: http::Request, uid: u64) {
         Err(_) => {
             internal_error(
                         request,
-                        "We're not shure if the file was added file to database, it was created successfully though",
+                        "We're not sure if the file was added file to database, it was created successfully though",
                     );
             common::log_error(
                 &"network.rs",
@@ -890,7 +880,7 @@ fn extract_from_form(entries: &Entries, key: &str) -> Result<String, i8> {
                 &"network.rs",
                 &"extract_from_form",
                 line!(),
-                &"Could not get data",
+                &format!("Could not get data with key: {}", key),
             );
             return Err(-1);
         }
@@ -928,18 +918,18 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
     let v_res: u64;
     let filesize: u64;
     let mut error: bool = false;
-    let path;
+    let mut path = String::new();
     let (tx, rx) = oneshot::channel::<Result<u64, i8>>();
     let mut fullpath = String::new();
 
-    let dummy_file: File = match File::open("/tmp/dummy") {
+    let dummy_file: File = match File::open("/tmp") {
         Ok(f) => f,
         Err(e) => {
             internal_error(request, &format!("Could not open dummy file: {}", e));
             return;
         }
     };
-    let mut f: File = match File::open("/tmp/dummy") {
+    let mut f: File = match File::open("/tmp") {
         Ok(f) => f,
         Err(e) => {
             internal_error(request, &format!("Could not open dummy file: {}", e));
@@ -957,14 +947,32 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         line = sanitize(line);
         lat = match line.parse::<f64>() {
             Ok(v) => v,
-            Err(_) => 0.0,
+            Err(_) => {
+                common::log_error(
+                    "network.rs",
+                    "mediaupload",
+                    line!(),
+                    &format!("Could not extract parameter latitude: {}", &line),
+                );
+                error = true;
+                0.0
+            }
         };
         line = String::new();
         let _ = reader.read_line(&mut line);
         line = sanitize(line);
         lon = match line.parse::<f64>() {
             Ok(v) => v,
-            Err(_) => 0.0,
+            Err(_) => {
+                common::log_error(
+                    "network.rs",
+                    "mediaupload",
+                    line!(),
+                    &format!("Could not extract parameter longitude: {}", &line),
+                );
+                error = true;
+                0.0
+            }
         };
         line = String::new();
         let _ = reader.read_line(&mut line);
@@ -972,6 +980,12 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         created = match line.parse::<u64>() {
             Ok(d) => d,
             Err(_) => {
+                common::log_error(
+                    "network.rs",
+                    "mediaupload",
+                    line!(),
+                    &format!("Could not extract parameter created: {}", &line),
+                );
                 error = true;
                 0
             }
@@ -982,6 +996,12 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         modified = match line.parse::<u64>() {
             Ok(d) => d,
             Err(_) => {
+                common::log_error(
+                    "network.rs",
+                    "mediaupload",
+                    line!(),
+                    &format!("Could not extract parameter modified: {}", &line),
+                );
                 error = true;
                 0
             }
@@ -992,6 +1012,12 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         h_res = match line.parse::<u64>() {
             Ok(d) => d,
             Err(_) => {
+                common::log_error(
+                    "network.rs",
+                    "mediaupload",
+                    line!(),
+                    &format!("Could not extract parameter h_res: {}", &line),
+                );
                 error = true;
                 0
             }
@@ -1002,6 +1028,12 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         v_res = match line.parse::<u64>() {
             Ok(d) => d,
             Err(_) => {
+                common::log_error(
+                    "network.rs",
+                    "mediaupload",
+                    line!(),
+                    &format!("Could not extract parameter v_res: {}", &line),
+                );
                 error = true;
                 0
             }
@@ -1012,6 +1044,12 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         duration = match line.parse::<i64>() {
             Ok(d) => d,
             Err(_) => {
+                common::log_error(
+                    "network.rs",
+                    "mediaupload",
+                    line!(),
+                    &format!("Could not extract parameter duration: {}", &line),
+                );
                 error = true;
                 -1
             }
@@ -1022,20 +1060,35 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         filesize = match line.parse::<u64>() {
             Ok(d) => d,
             Err(_) => {
+                common::log_error(
+                    "network.rs",
+                    "mediaupload",
+                    line!(),
+                    &format!("Could not extract parameter filesize: {}", &line),
+                );
                 error = true;
                 0
             }
         };
 
-        path = match build_path(uid, created, modified, &bucket) {
-            Ok(p) => p,
-            Err(_) => {
-                error = true;
-                String::new()
-            }
-        };
-
         if !error {
+            path = match build_path(uid, created, modified, &bucket) {
+                Ok(p) => p,
+                Err(_) => {
+                    common::log_error(
+                        "network.rs",
+                        "mediaupload",
+                        line!(),
+                        &format!(
+                            "Could not build path: {}, {}, {}, {}",
+                            uid, created, modified, &bucket
+                        ),
+                    );
+                    error = true;
+                    String::new()
+                }
+            };
+
             let path2 = format!("{}", &path);
             let filename2 = format!("{}", &filename);
             thread::spawn(move || {
@@ -1043,18 +1096,8 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
                     let _ = tx.send(Ok(0));
                 } else {
                     let id = database::add_media(
-                        path2,
-                        filename2,
-                        bucket,
-                        created,
-                        modified,
-                        lat,
-                        lon,
-                        h_res,
-                        v_res,
-                        duration,
-                        filesize,
-                        uid,
+                        path2, filename2, bucket, created, modified, lat, lon, h_res, v_res,
+                        duration, filesize, uid,
                     );
                     let _ = tx.send(id);
                 }
@@ -1062,15 +1105,32 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
 
             fullpath.push_str(&path);
             fullpath.push_str(&filename);
+        }
 
+        if !error {
             error = match create_dirs(&path, uid) {
                 Ok(_) => false,
-                Err(_) => true,
+                Err(_) => {
+                    common::log_error(
+                        "network.rs",
+                        "mediaupload",
+                        line!(),
+                        "Could not create directories",
+                    );
+                    true
+                }
             };
-
+        }
+        if !error {
             f = match File::create(Path::new(&fullpath)) {
                 Ok(v) => v,
-                Err(_) => {
+                Err(e) => {
+                    common::log_error(
+                        "network.rs",
+                        "mediaupload",
+                        line!(),
+                        &format!("Could not create file: {}", e),
+                    );
                     error = true;
                     dummy_file
                 }
@@ -1111,7 +1171,8 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         }
     }
     if error {
-        internal_error(request, "Could not build target path");
+        common::log_error("network.rs", "mediaupload", line!(), "Could not write file");
+        internal_error(request, "An error happened while writing the file");
         return;
     }
 
@@ -1136,10 +1197,10 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
             Ok(t) => t,
             Err(_) => {
                 common::log_error(
-                    &"network.rs",
-                    &"mediaupload_multipart",
+                    "network.rs",
+                    "mediaupload",
                     line!(),
-                    &"Could not get ownership info",
+                    "Could not get ownership info",
                 );
                 ("root".to_string(), "users".to_string(), true)
             }
@@ -1172,7 +1233,7 @@ pub fn mediaupload(mut request: http::Request, uid: u64) {
         Err(_) => {
             internal_error(
                         request,
-                        "We're not shure if the file was added file to database, it was created successfully though",
+                        "We're not sure if the file was added file to database, it was created successfully though",
                     );
             common::log_error(
                 &"network.rs",
@@ -1250,6 +1311,12 @@ fn build_path(uid: u64, created: u64, modified: u64, bucket: &str) -> Result<Str
     let mut path = match database::get_userpath(uid) {
         Ok(p) => p,
         Err(_) => {
+            common::log_error(
+                "network.rs",
+                "build_path",
+                line!(),
+                "Could not get userpath",
+            );
             return Err(-1);
         }
     };
@@ -1363,10 +1430,11 @@ pub fn mediasearch(request: http::Request, uid: u64) {
 }
 
 pub fn internal_error(request: http::Request, message: &str) {
-    println!(
-        "Internal Error on URL: {} with message: {}",
-        request.url(),
-        message
+    common::log_error(
+        "network.rs",
+        "internal_error",
+        line!(),
+        &format!("Internal server error: {}", message),
     );
     let response =
         http::Response::from_string(message).with_status_code(http::StatusCode::from(500));

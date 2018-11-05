@@ -1,11 +1,13 @@
+use fs_extra;
 use mysql as sql;
 use num_cpus;
 use quick_xml::events::Event;
-use quick_xml::reader::Reader;
+use quick_xml::Reader;
 use reqwest;
 use tlq;
 
 use std::io::Read;
+use std::path::Path;
 use std::process::exit;
 use std::sync::Mutex;
 use std::thread;
@@ -56,6 +58,10 @@ pub fn init() -> Result<u8, i8> {
                     continue;
                 }
             };
+            if remove_deleted(id) {
+                continue;
+            }
+
             match make_thumbnail(id) {
                 Ok(_) => {
                     //nothing
@@ -79,6 +85,10 @@ pub fn init() -> Result<u8, i8> {
     thread::spawn(move || loop {
         common::log_info(&"maintenance.rs", &"init", line!(), &"Running maintenance");
         let start = common::current_time_millis();
+
+        for id in all_pics() {
+            let _ = remove_deleted(id);
+        }
 
         if uneven {
             make_all_thumbnails();
@@ -255,6 +265,28 @@ pub fn init() -> Result<u8, i8> {
     Ok(0)
 }
 
+fn remove_deleted(id: u64) -> bool {
+    let media = match database::get_mediainfo_by_id(id) {
+        Ok(v) => v,
+        Err(_) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_thumbnail",
+                line!(),
+                &"Could not get mediainfo",
+            );
+            return false;
+        }
+    };
+    if !Path::new(&media.get_full_path()).exists() {
+        let mut from_paths = Vec::new();
+        from_paths.push(media.get_full_path());
+        let _ = fs_extra::remove_items(&from_paths);
+        return true;
+    }
+    false
+}
+
 pub fn add_id(id: u64) {
     match PROD_CONS.lock() {
         Ok(p) => {
@@ -319,19 +351,20 @@ fn do_geocode(id: u64) -> Result<u8, i8> {
             return Err(-1);
         }
     };
-    let mut query =
-        match database::build_query("SELECT latitude, longitude FROM §§.Media WHERE id = ?;") {
-            Ok(q) => q,
-            Err(_) => {
-                common::log_error(
-                    &"maintenance.rs",
-                    &"do_geocode",
-                    line!(),
-                    &"Could not build query",
-                );
-                return Err(-1);
-            }
-        };
+    let mut query = match database::build_query(
+        "SELECT latitude, longitude, doneCoding FROM §§.Media WHERE id = ?;",
+    ) {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"do_geocode",
+                line!(),
+                &"Could not build query",
+            );
+            return Err(-1);
+        }
+    };
     let mut stmt = match pool.prepare(query) {
         Ok(s) => s,
         Err(e) => {
@@ -370,13 +403,13 @@ fn do_geocode(id: u64) -> Result<u8, i8> {
             }
             Ok(row) => row,
         };
-        let (lat, long) = match sql::from_row_opt::<(f64, f64)>(row) {
+        let (lat, long, done_coding) = match sql::from_row_opt::<(f64, f64, bool)>(row) {
             Ok(e) => e,
             Err(_) => {
                 continue;
             }
         };
-        if lat == 0.0 || long == 0.0 {
+        if done_coding || lat == 0.0 || long == 0.0 {
             continue;
         }
         let mut url = String::new();
@@ -659,4 +692,78 @@ fn make_all_thumbnails() {
             }
         };
     }
+}
+
+fn all_pics() -> Vec<u64> {
+    let mut out: Vec<u64> = Vec::new();
+    let pool = match database::get_db() {
+        Ok(db) => db,
+        Err(_) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_all_thumbnails",
+                line!(),
+                &"Could not get database",
+            );
+            return out;
+        }
+    };
+    let query = match database::build_query("SELECT id FROM §§.Media") {
+        Ok(q) => q,
+        Err(_) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_all_thumbnails",
+                line!(),
+                &"Could not build query",
+            );
+            return out;
+        }
+    };
+    let mut stmt = match pool.prepare(query) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_all_thumbnails",
+                line!(),
+                &format!("Could not prepare statement: {}", e),
+            );
+            return out;
+        }
+    };
+    let result = match stmt.execute(()) {
+        Ok(s) => s,
+        Err(e) => {
+            common::log_error(
+                &"maintenance.rs",
+                &"make_all_thumbnails",
+                line!(),
+                &format!("Could not execute statement: {}", e),
+            );
+            return out;
+        }
+    };
+    for wrapped_row in result {
+        let row = match wrapped_row {
+            Err(_) => {
+                common::log_error(
+                    &"maintenance.rs",
+                    &"make_all_thumbnails",
+                    line!(),
+                    &"Error unwraping row",
+                );
+                continue;
+            }
+            Ok(row) => row,
+        };
+        let (id,) = match sql::from_row_opt::<(u64,)>(row) {
+            Ok(e) => e,
+            Err(_) => {
+                continue;
+            }
+        };
+        out.push(id);
+    }
+    return out;
 }

@@ -4,32 +4,35 @@ version = "0.1.0"
 authors = ["Baschdl578 <remailer1@yahoo.de>"]
 
 [dependencies]
-image = "0.19"
+image = "0.20"
 rexiv2 = "0.6"
-lazy_static = "1.0"
-base64 = "0.9"
-rand = "0.4"
+lazy_static = "1.1"
+base64 = "0.10"
+rand = "0.5"
 two-lock-queue = "0.1"
 num_cpus = "1.8"
 time = "0.1"
-quick-xml = "0.11"
+quick-xml = "0.13"
 locale = "0.2"
-reqwest = "0.7"
+reqwest = "0.9"
 chrono = "0.4"
-ascii = "0.7"
+ascii = "0.9"
 futures = "0.1"
 fs_extra = "1.1"
 log = "0.4"
 simple-logging = "2.0"
+actix = "0.7"
+serde_derive = "1.0"
+serde = "1.0"
+actix-form-data = "0.3.1"
+mime = "0.3"
+openssl = "0.10"
+http = "0.1"
 
 [dependencies.mysql]
-version = "12.3"
+version = "14.1"
 features = ["ssl"]
 
-[dependencies.multipart]
-version = "0.14"
-features = ["tiny_http", "server"]
-
-[dependencies.tiny_http]
-version = "0.5"
-#features = ["ssl"]
+[dependencies.actix-web]
+version = "0.7"
+features = ["alpn"]

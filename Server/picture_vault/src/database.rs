@@ -1008,6 +1008,8 @@ fn add_library(bucket: &String) -> Result<u8, i8> {
     return Ok(0);
 }
 
+
+
 pub fn add_media(
     path: String,
     filename: String,
@@ -1912,7 +1914,7 @@ pub fn get_lastsync(uid: u64) -> Result<u64, i8> {
             Err(_) => {
                 common::log_error(
                     &"database.rs",
-                    &"get_userpath",
+                    &"get_lastsync",
                     line!(),
                     &"Error unwraping row",
                 );

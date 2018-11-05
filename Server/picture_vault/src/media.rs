@@ -1,5 +1,5 @@
 use image;
-use image::{imageops, GenericImage};
+use image::{GenericImageView, imageops};
 use rexiv2;
 
 use std::cmp::min;
