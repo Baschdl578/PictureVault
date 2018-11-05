@@ -1,11 +1,11 @@
-<org.baschdl.picturevault.uielements.SquareRelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<de.smschindler.picturevault.uielements.SquareRelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/rel1"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:padding="2dp">
 
-    <org.baschdl.picturevault.uielements.Slideshow
+    <de.smschindler.picturevault.uielements.Slideshow
         android:id="@+id/slideshow"
         android:layout_width="match_parent"
         android:layout_height="match_parent" />
@@ -40,4 +40,4 @@
 
 
     </RelativeLayout>
-</org.baschdl.picturevault.uielements.SquareRelativeLayout>
+</de.smschindler.picturevault.uielements.SquareRelativeLayout>

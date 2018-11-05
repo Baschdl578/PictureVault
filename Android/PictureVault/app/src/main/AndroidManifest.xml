@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
 
-    package="org.baschdl.picturevault">
+    package="de.smschindler.picturevault">
 
 
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
@@ -12,10 +12,12 @@
     <uses-permission android:name="android.permission.AUTHENTICATE_ACCOUNTS" />
     <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
     <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+
 
 
     <application
-        android:name=".MyApplication"
+        android:name="de.smschindler.picturevault.MyApplication"
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -24,7 +26,7 @@
         android:theme="@style/AppTheme">
 
 
-        <receiver android:name=".sync.NotificationReceiver">
+        <receiver android:name="de.smschindler.picturevault.sync.NotificationReceiver">
             <intent-filter android:priority="100">
                 <action
                     android:name="PictureVault.MediaSyncAdapter.addlib"
@@ -32,18 +34,18 @@
             </intent-filter>
         </receiver>
 
-        <receiver android:name=".sync.CancelBroadcastReceiver">
+        <receiver android:name="de.smschindler.picturevault.sync.CancelBroadcastReceiver">
         </receiver>
 
 
         <activity
-            android:name=".settings.Settings"
+            android:name="de.smschindler.picturevault.settings.Settings"
             android:screenOrientation="portrait">
         </activity>
 
 
         <activity
-            android:name=".libraries.LibraryChooser"
+            android:name="de.smschindler.picturevault.libraries.LibraryChooser"
             >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
@@ -53,23 +55,23 @@
         </activity>
 
 
-        <activity android:name=".thumbs.ImageGrid" />
+        <activity android:name="de.smschindler.picturevault.thumbs.ImageGrid" />
 
 
-        <activity android:name=".image.FullImage"
+        <activity android:name="de.smschindler.picturevault.image.FullImage"
             android:theme="@style/FullScreen">
 
         </activity>
 
 
         <activity
-            android:name=".Test"
+            android:name="de.smschindler.picturevault.Test"
             android:screenOrientation="portrait">
         </activity>
 
 
 
-        <service android:name=".sync.AuthenticatorService">
+        <service android:name="de.smschindler.picturevault.sync.AuthenticatorService">
             <intent-filter>
                 <action android:name="android.accounts.AccountAuthenticator" />
             </intent-filter>
@@ -79,11 +81,11 @@
         </service>
 
 
-        <service android:name=".sync.ForegroundSync"/>
+        <service android:name="de.smschindler.picturevault.sync.ForegroundSync"/>
 
 
         <service
-            android:name=".sync.SyncService"
+            android:name="de.smschindler.picturevault.sync.SyncService"
             android:exported="true">
             <!-- This intent filter is required. It allows the system to launch our sync service
             as needed. -->
@@ -98,8 +100,8 @@
 
 
         <provider
-            android:name=".sync.StubContentProvider"
-            android:authorities="org.baschdl.picturevault.provider"
+            android:name="de.smschindler.picturevault.sync.StubContentProvider"
+            android:authorities="de.smschindler.picturevault.provider"
             android:exported="false"
             android:syncable="true" />
 

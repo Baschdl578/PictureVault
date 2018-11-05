@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <sync-adapter xmlns:android="http://schemas.android.com/apk/res/android"
-    android:accountType="org.baschdl.picturevault"
+    android:accountType="de.smschindler.picturevault"
     android:allowParallelSyncs="false"
-    android:contentAuthority="org.baschdl.picturevault.provider"
+    android:contentAuthority="de.smschindler.picturevault.provider"
     android:isAlwaysSyncable="true"
     android:supportsUploading="true"
     android:userVisible="true" />
